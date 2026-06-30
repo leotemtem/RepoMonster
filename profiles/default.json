@@ -1,0 +1,24 @@
+{
+  "id": "default",
+  "name": "Default gatekeeper profile",
+  "required_description_sections": [
+    "Problem",
+    "Approach",
+    "Acceptance Criteria",
+    "Test Evidence"
+  ],
+  "require_task_reference_for_code_changes": true,
+  "require_test_evidence_when_code_changes": true,
+  "max_warnings_for_ready": 1,
+  "large_change_line_threshold": 400,
+  "labels": {
+    "ready": "ready-for-human-review",
+    "rework": "needs-author-updates"
+  },
+  "retrieval_order": [
+    "task",
+    "repo",
+    "company",
+    "public"
+  ]
+}

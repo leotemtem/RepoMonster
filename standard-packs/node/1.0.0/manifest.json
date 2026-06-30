@@ -1,0 +1,40 @@
+{
+  "id": "node",
+  "version": "1.0.0",
+  "name": "Node.js service review baseline",
+  "description": "Asynchronous errors, lifecycle, package boundaries, and testing guidance for Node.js services.",
+  "language": "typescript",
+  "framework": null,
+  "supported_versions": ">=20",
+  "sources": [
+    {"title": "Node.js errors", "url": "https://nodejs.org/api/errors.html"},
+    {"title": "Node.js test runner", "url": "https://nodejs.org/api/test.html"},
+    {"title": "Node.js packages", "url": "https://nodejs.org/api/packages.html"},
+    {"title": "Async context", "url": "https://nodejs.org/api/async_context.html"}
+  ],
+  "documents": [
+    {
+      "path": "review-guidance.md",
+      "title": "Node.js service reliability",
+      "tags": ["typescript", "node", "async", "errors", "testing"],
+      "rules": [
+        {
+          "id": "node-async-errors",
+          "severity": "warning",
+          "gate": false,
+          "title": "Asynchronous failures are handled deliberately",
+          "rationale": "Unhandled promise and event-emitter failures can terminate or corrupt service work.",
+          "check_statements": ["Promises are awaited, returned, or intentionally detached with handling.", "Event-emitter error behaviour is accounted for."]
+        },
+        {
+          "id": "node-lifecycle-tests",
+          "severity": "warning",
+          "gate": false,
+          "title": "Lifecycle and failure behaviour is tested",
+          "rationale": "Service reliability depends on cleanup and error paths as well as successful requests.",
+          "check_statements": ["Changed asynchronous failure paths are tested.", "Owned resources are closed during shutdown and tests."]
+        }
+      ]
+    }
+  ]
+}

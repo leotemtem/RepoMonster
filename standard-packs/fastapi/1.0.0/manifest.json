@@ -1,0 +1,40 @@
+{
+  "id": "fastapi",
+  "version": "1.0.0",
+  "name": "FastAPI review baseline",
+  "description": "API contracts, validation, dependency boundaries, and testing guidance for FastAPI services.",
+  "language": "python",
+  "framework": "fastapi",
+  "supported_versions": ">=0.100",
+  "sources": [
+    {"title": "FastAPI request bodies", "url": "https://fastapi.tiangolo.com/tutorial/body/"},
+    {"title": "FastAPI dependencies", "url": "https://fastapi.tiangolo.com/tutorial/dependencies/"},
+    {"title": "FastAPI testing", "url": "https://fastapi.tiangolo.com/tutorial/testing/"},
+    {"title": "FastAPI response models", "url": "https://fastapi.tiangolo.com/tutorial/response-model/"}
+  ],
+  "documents": [
+    {
+      "path": "review-guidance.md",
+      "title": "FastAPI contracts and service boundaries",
+      "tags": ["python", "fastapi", "api", "validation", "testing"],
+      "rules": [
+        {
+          "id": "fastapi-explicit-contract",
+          "severity": "warning",
+          "gate": false,
+          "title": "API contract changes are explicit",
+          "rationale": "Request, response, and status-code changes affect external consumers.",
+          "check_statements": ["Request validation is represented by explicit models.", "Response shape and status behaviour are intentional."]
+        },
+        {
+          "id": "fastapi-route-tests",
+          "severity": "warning",
+          "gate": false,
+          "title": "Route behaviour is tested",
+          "rationale": "Route-level tests verify validation, dependency integration, and HTTP behaviour.",
+          "check_statements": ["Changed success behaviour has an API test.", "Relevant validation and failure responses are tested."]
+        }
+      ]
+    }
+  ]
+}

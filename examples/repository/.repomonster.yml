@@ -1,0 +1,29 @@
+version: 1
+
+knowledge:
+  description:
+    - .repomonster/project.md
+  requirements:
+    - .repomonster/requirements.md
+  standards:
+    - .repomonster/standards/*.md
+
+stacks:
+  - paths:
+      - app/**
+      - tests/**
+    language: python
+    framework: fastapi
+    packs:
+      - python@1.0.0
+      - fastapi@1.0.0
+
+checks:
+  required_ci:
+    - test
+    - lint
+  require_task_reference: true
+  require_test_evidence: true
+
+model:
+  profile: default

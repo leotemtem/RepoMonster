@@ -1,0 +1,40 @@
+{
+  "id": "python",
+  "version": "1.0.0",
+  "name": "Python review baseline",
+  "description": "Maintainability, typing, error handling, and testing guidance for Python services.",
+  "language": "python",
+  "framework": null,
+  "supported_versions": ">=3.11",
+  "sources": [
+    {"title": "Python documentation", "url": "https://docs.python.org/3/"},
+    {"title": "PEP 8", "url": "https://peps.python.org/pep-0008/"},
+    {"title": "Python typing", "url": "https://docs.python.org/3/library/typing.html"},
+    {"title": "unittest", "url": "https://docs.python.org/3/library/unittest.html"}
+  ],
+  "documents": [
+    {
+      "path": "review-guidance.md",
+      "title": "Python maintainability and correctness",
+      "tags": ["python", "typing", "errors", "testing", "maintainability"],
+      "rules": [
+        {
+          "id": "python-clear-contracts",
+          "severity": "warning",
+          "gate": false,
+          "title": "Changed interfaces have clear contracts",
+          "rationale": "Explicit inputs, outputs, and failure behaviour reduce review ambiguity.",
+          "check_statements": ["Public functions expose understandable contracts.", "Type information is preserved at important boundaries."]
+        },
+        {
+          "id": "python-tested-behaviour",
+          "severity": "warning",
+          "gate": false,
+          "title": "Behaviour changes have focused tests",
+          "rationale": "Tests should demonstrate externally meaningful behaviour and failure paths.",
+          "check_statements": ["Changed behaviour is covered by a focused test.", "Important error paths are exercised."]
+        }
+      ]
+    }
+  ]
+}

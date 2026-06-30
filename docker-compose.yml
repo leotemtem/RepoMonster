@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-repomonster}
+      POSTGRES_USER: ${POSTGRES_USER:-repomonster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - repomonster-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  bootstrap:
+    build: .
+    command: ["repomonster", "bootstrap"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-repomonster}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-repomonster}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-repomonster}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-repomonster}
+    ports:
+      - "${REPOMONSTER_PORT:-8000}:8000"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  repomonster-data:

@@ -1,0 +1,35 @@
+{
+  "provider": "github",
+  "change_kind": "pull_request",
+  "repository": "acme/payments-api",
+  "repository_key": "github:https://github.com:123456",
+  "external_id": "184",
+  "title": "Add idempotent payment capture endpoint",
+  "description": "## Problem\nDuplicate capture requests can create duplicate downstream actions.\n\n## Approach\nAdd an idempotency key check to the capture endpoint and persist prior outcomes.\n\n## Acceptance Criteria\nA repeated capture request with the same idempotency key returns the original response without a second capture.\n\n## Test Evidence\nAdded API and service tests for repeated requests.\n",
+  "target_branch": "main",
+  "source_branch": "feature/payment-capture",
+  "framework": "fastapi",
+  "standard_packs": ["python@1.0.0", "fastapi@1.0.0"],
+  "task_references": [
+    {
+      "kind": "jira",
+      "value": "PAY-142"
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "app/api/routes/capture.py",
+      "language": "python",
+      "additions": 48,
+      "deletions": 6,
+      "summary": "Adds idempotency check and prior result reuse."
+    },
+    {
+      "path": "tests/api/test_capture.py",
+      "language": "python",
+      "additions": 74,
+      "deletions": 0,
+      "summary": "Covers repeated capture scenarios."
+    }
+  ]
+}

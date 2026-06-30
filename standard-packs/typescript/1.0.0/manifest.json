@@ -1,0 +1,39 @@
+{
+  "id": "typescript",
+  "version": "1.0.0",
+  "name": "TypeScript review baseline",
+  "description": "Type safety, narrowing, module boundaries, and testing guidance for TypeScript projects.",
+  "language": "typescript",
+  "framework": null,
+  "supported_versions": ">=5",
+  "sources": [
+    {"title": "TypeScript handbook", "url": "https://www.typescriptlang.org/docs/handbook/intro.html"},
+    {"title": "Type narrowing", "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"},
+    {"title": "TSConfig strict", "url": "https://www.typescriptlang.org/tsconfig/strict.html"}
+  ],
+  "documents": [
+    {
+      "path": "review-guidance.md",
+      "title": "TypeScript type safety and maintainability",
+      "tags": ["typescript", "types", "strict", "testing", "maintainability"],
+      "rules": [
+        {
+          "id": "typescript-safe-boundaries",
+          "severity": "warning",
+          "gate": false,
+          "title": "External data is narrowed safely",
+          "rationale": "Static types do not validate data arriving at runtime.",
+          "check_statements": ["Untrusted data is validated or narrowed before use.", "Changed boundaries do not introduce unjustified any-like escapes."]
+        },
+        {
+          "id": "typescript-tests",
+          "severity": "warning",
+          "gate": false,
+          "title": "Changed runtime behaviour is tested",
+          "rationale": "Compile-time checks and runtime tests cover different failure modes.",
+          "check_statements": ["Behaviour changes have runtime tests.", "Type checks remain part of CI."]
+        }
+      ]
+    }
+  ]
+}
