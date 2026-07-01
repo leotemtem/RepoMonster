@@ -30,12 +30,35 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-repomonster}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-repomonster}
+    networks:
+      default:
+      shared:
+        aliases:
+          - repomonster-api
     ports:
-      - "${REPOMONSTER_PORT:-8000}:8000"
+      - "127.0.0.1:${REPOMONSTER_PORT:-8000}:8000"
     depends_on:
       bootstrap:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["repomonster", "worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-repomonster}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-repomonster}
+    volumes:
+      - /opt/repomonster/secrets/github-app.pem:/run/secrets/github_app_key:ro
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    stop_grace_period: 3m
+    restart: unless-stopped
+
+networks:
+  shared:
+    external: true
 
 volumes:
   repomonster-data:

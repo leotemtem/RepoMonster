@@ -184,6 +184,39 @@ class RepositoryKnowledgeSynchronizer:
         logical_key = f"{namespace}:{repository_key}:{source.path}"
         document_id = f"{logical_key}@{source.source_sha}"
         chunks = chunk_markdown(source.content)
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT count(*)
+                FROM standard_documents AS document
+                JOIN standard_chunks AS chunk ON chunk.document_id = document.id
+                WHERE document.id = %s
+                  AND document.content_checksum = %s
+                  AND chunk.embedding_model = %s
+                  AND chunk.embedding_dimensions = %s
+                """,
+                (
+                    document_id,
+                    checksum,
+                    self.embedding_provider.model_id,
+                    self.embedding_provider.dimensions,
+                ),
+            )
+            if int(cursor.fetchone()[0]) == len(chunks):
+                cursor.execute(
+                    "UPDATE standard_documents SET enabled = true, updated_at = now() WHERE id = %s",
+                    (document_id,),
+                )
+                if scope == "repo":
+                    cursor.execute(
+                        """
+                        UPDATE repository_standard_sources
+                        SET status = 'ready', indexed_at = now(), document_id = %s
+                        WHERE repository_id = %s AND source_path = %s
+                        """,
+                        (document_id, repository_id, source.path),
+                    )
+                return
         vectors = self.embedding_provider.embed([content for _, content in chunks])
         stack_key = f"{source.language or 'any'}/{source.framework or 'any'}"
 
