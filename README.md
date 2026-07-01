@@ -117,6 +117,8 @@ model:
 
 Pack versions are pinned for reproducible reviews. Model URLs and API keys are deployment secrets and are rejected if placed in repository configuration.
 
+`checks.require_task_reference` controls readiness, not whether analysis runs. When it is `true`, code changes without a resolvable issue or ticket receive a deterministic blocking finding, while repository and model analysis still continue. Set it to `false` when the structured pull-request description is the repository's authoritative task specification and a separate issue is not required.
+
 During onboarding, a provider adapter must read this configuration from the trusted default branch, fetch its referenced files, and call `RepositoryKnowledgeSynchronizer`. That service registers the stable repository identity, stores selected packs, chunks and embeds repository documents, and disables superseded document versions.
 
 The GitHub worker performs this onboarding automatically. Unchanged repository documents reuse their existing embeddings; changed blobs are versioned and re-embedded.

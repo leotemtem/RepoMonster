@@ -35,6 +35,34 @@ class InsightProviderTests(unittest.TestCase):
 
         self.assertEqual(finding.severity.value, "error")
 
+    def test_scalar_evidence_is_treated_as_one_item(self) -> None:
+        finding = OpenAICompatibleInsightProvider._finding(
+            {
+                "severity": "info",
+                "category": "correctness",
+                "title": "Task is implemented",
+                "detail": "The endpoint matches the acceptance criteria.",
+                "evidence": "app/main.py",
+                "rule_id": None,
+            }
+        )
+
+        self.assertEqual(finding.evidence, ["app/main.py"])
+
+    def test_null_evidence_is_treated_as_empty(self) -> None:
+        finding = OpenAICompatibleInsightProvider._finding(
+            {
+                "severity": "info",
+                "category": "clarity",
+                "title": "Clear implementation",
+                "detail": "No specific source location was supplied.",
+                "evidence": None,
+                "rule_id": None,
+            }
+        )
+
+        self.assertEqual(finding.evidence, [])
+
 
 if __name__ == "__main__":
     unittest.main()
