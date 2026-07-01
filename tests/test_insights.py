@@ -21,6 +21,20 @@ class InsightProviderTests(unittest.TestCase):
         self.assertEqual(finding.severity.value, "warning")
         self.assertEqual(finding.rule_id, "repo-route-boundary")
 
+    def test_model_severity_is_case_insensitive(self) -> None:
+        finding = OpenAICompatibleInsightProvider._finding(
+            {
+                "severity": " ERROR ",
+                "category": "correctness",
+                "title": "Validation gap",
+                "detail": "A boundary case is not handled.",
+                "evidence": ["app/main.py"],
+                "rule_id": None,
+            }
+        )
+
+        self.assertEqual(finding.severity.value, "error")
+
 
 if __name__ == "__main__":
     unittest.main()
