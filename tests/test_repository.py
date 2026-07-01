@@ -116,6 +116,37 @@ class PostgresRepositoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _vector_literal([0.1], 3)
 
+    def test_nullable_retrieval_filters_have_explicit_postgres_types(self) -> None:
+        connection = _Connection()
+        repository = PostgresStandardsRepository(
+            database_url="postgresql://unused",
+            embedding_provider=_EmbeddingProvider(),
+            profiles_root=Path("profiles"),
+        )
+        repository._connect = lambda: connection
+        request = ReviewRequest.from_dict(
+            {
+                "provider": "github",
+                "change_kind": "pull_request",
+                "repository": "acme/api",
+                "external_id": "2",
+                "title": "Documentation only",
+                "description": "Update documentation",
+                "changed_files": [{"path": "README.md"}],
+            }
+        )
+        profile = ReviewProfile.from_dict(
+            {"id": "default", "name": "Default", "retrieval_order": ["repo"]}
+        )
+
+        repository.retrieve(request, profile)
+
+        sql, params = connection.cursor_instance.executions[0]
+        self.assertIn("ANY(%s::text[])", sql)
+        self.assertEqual(sql.count("%s::text IS NOT NULL"), 2)
+        self.assertIsNone(params[7])
+        self.assertIsNone(params[9])
+
 
 if __name__ == "__main__":
     unittest.main()

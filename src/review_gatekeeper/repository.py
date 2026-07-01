@@ -160,10 +160,16 @@ class PostgresStandardsRepository:
                     ))
                  OR (d.scope = 'company' AND d.tenant_key = %s)
                  OR (d.scope = 'repo' AND d.repository_key = %s)
-                 OR (d.scope = 'task' AND d.repository_key = %s AND d.task_key = ANY(%s))
+                 OR (d.scope = 'task' AND d.repository_key = %s AND d.task_key = ANY(%s::text[]))
               )
-              AND (d.language IS NULL OR (%s IS NOT NULL AND lower(d.language) = %s))
-              AND (d.framework IS NULL OR (%s IS NOT NULL AND lower(d.framework) = %s))
+              AND (
+                    d.language IS NULL
+                    OR (%s::text IS NOT NULL AND lower(d.language) = %s::text)
+              )
+              AND (
+                    d.framework IS NULL
+                    OR (%s::text IS NOT NULL AND lower(d.framework) = %s::text)
+              )
               AND c.embedding IS NOT NULL
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
