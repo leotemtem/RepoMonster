@@ -1,7 +1,7 @@
 [project]
 name = "repomonster"
 version = "0.1.0"
-description = "RAG-backed gatekeeper for GitHub pull requests and GitLab merge requests"
+description = "Self-hosted RAG-backed readiness gate for GitHub pull requests"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
