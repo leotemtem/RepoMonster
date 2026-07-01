@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
 import os
+import signal
+import threading
 from pathlib import Path
 
 from .config import load_repository_config
 from .database import DatabaseMigrator, project_root
 from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
+from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
+from .insights import OpenAICompatibleInsightProvider
+from .jobs import WebhookQueue
 from .packs import PackSynchronizer, discover_packs
-from .repository import OpenAICompatibleEmbeddingProvider
+from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
+from .service import ReviewService
 
 
 def _connect():
@@ -114,6 +121,66 @@ def _sync_local_repository(args) -> int:
     return 0
 
 
+def _worker() -> int:
+    root = project_root()
+    database_url = os.environ["DATABASE_URL"]
+    embedding_provider = OpenAICompatibleEmbeddingProvider.from_environment()
+    insight_provider = (
+        OpenAICompatibleInsightProvider.from_environment()
+        if os.getenv("INSIGHT_BASE_URL")
+        else None
+    )
+    review_service = ReviewService(
+        PostgresStandardsRepository(
+            database_url=database_url,
+            embedding_provider=embedding_provider,
+            profiles_root=root / "profiles",
+            tenant_key=os.getenv("TENANT_KEY"),
+        ),
+        insight_provider=insight_provider,
+    )
+    queue = WebhookQueue(
+        database_url,
+        max_attempts=int(os.getenv("WEBHOOK_MAX_ATTEMPTS", "5")),
+        lock_timeout_seconds=int(os.getenv("WEBHOOK_LOCK_TIMEOUT_SECONDS", "900")),
+    )
+    processor = GitHubReviewProcessor(
+        database_url=database_url,
+        queue=queue,
+        client=GitHubClient(GitHubSettings.from_environment()),
+        embedding_provider=embedding_provider,
+        review_service=review_service,
+    )
+    poll_seconds = float(os.getenv("WORKER_POLL_SECONDS", "2"))
+    stop = threading.Event()
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    logger = logging.getLogger("repomonster.worker")
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    logger.info("GitHub review worker started")
+    while not stop.is_set():
+        job = queue.claim()
+        if job is None:
+            stop.wait(poll_seconds)
+            continue
+        try:
+            processed = processor.process(job)
+            queue.complete(job.id, ignored=not processed)
+            logger.info("delivery %s completed", job.delivery_id)
+        except Exception as exc:
+            exhausted = queue.fail(job, exc)
+            logger.exception(
+                "delivery %s failed on attempt %s", job.delivery_id, job.attempts
+            )
+            if exhausted:
+                processor.mark_terminal_failure(job, exc)
+    logger.info("GitHub review worker stopped")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="repomonster")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -136,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     sync_local.add_argument("--full-name")
     sync_local.add_argument("--default-branch", default="main")
     commands.add_parser("bootstrap")
+    commands.add_parser("worker")
     args = parser.parse_args(argv)
 
     if args.command == "db" and args.db_command == "migrate":
@@ -147,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bootstrap":
         _migrate()
         return _sync(force=False)
+    if args.command == "worker":
+        return _worker()
     parser.error("Unsupported command")
     return 2
 

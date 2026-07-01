@@ -12,14 +12,16 @@ It is not an autonomous approver. Missing required evidence, CI failures, and po
 GitHub/GitLab
      │ webhook + provider installation identity
      ▼
-RepoMonster API ──► review worker (provider milestone)
+RepoMonster API ──► PostgreSQL webhook queue ──► review worker
                          │
              ┌───────────┴───────────┐
              ▼                       ▼
       PostgreSQL + pgvector   configured model endpoint
 ```
 
-The same image supplies the API and management commands. Docker Compose runs a one-shot bootstrap container before starting the API. Schema migrations and standards data synchronization are separate operations.
+The same image supplies the API, worker, and management commands. Docker Compose runs a one-shot bootstrap container before starting the API and worker. Schema migrations and standards data synchronization are separate operations.
+
+The webhook request path performs only bounded body reading, HMAC verification, JSON validation, event filtering, and an idempotent queue insert. Slow provider, embedding, and model calls occur in the worker. Jobs are claimed with `FOR UPDATE SKIP LOCKED`, retried with backoff, and recovered if a worker dies while holding a job.
 
 ## Knowledge model
 
@@ -62,7 +64,7 @@ The diff and CI output are review evidence, not permanent public-standard conten
 
 Provider adapters are responsible for authentication, webhook verification, authoritative diff retrieval, linked-task retrieval, and publication. The review engine receives a provider-independent `ReviewRequest`.
 
-GitHub deployments use a repository-installed GitHub App and short-lived installation tokens. GitLab deployments use a project/group token or OAuth integration. Credentials are referenced from deployment secret storage and are never read from repository configuration.
+The GitHub adapter verifies `X-Hub-Signature-256`, exchanges a signed App JWT for a short-lived installation token restricted to the webhook repository, reads policy from the default branch, and publishes a Check Run on the current PR head SHA. GitLab deployments will use a project/group token or OAuth integration; that full adapter is not implemented yet. Credentials are referenced from deployment secret storage and are never read from repository configuration.
 
 ## Execution boundary
 
