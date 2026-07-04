@@ -107,9 +107,49 @@ class InsightProviderTests(unittest.TestCase):
         with patch(
             "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
         ), self.assertRaisesRegex(
-            InsightResponseError, "producing reasoning but no final answer"
+            InsightResponseError, "reasoning but no valid structured final answer"
         ):
             provider.generate("Review this change")
+
+    def test_complete_structured_reasoning_is_used_when_content_is_empty(self) -> None:
+        provider = OpenAICompatibleInsightProvider(
+            "http://model.test/v1", "test-model"
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": json.dumps(
+                                {
+                                    "findings": [
+                                        {
+                                            "severity": "error",
+                                            "category": "contract_violation",
+                                            "title": "Case preservation violation",
+                                            "detail": "The implementation lowercases the name.",
+                                            "evidence": ["name.lower()"],
+                                            "rule_id": "case-preservation",
+                                        }
+                                    ]
+                                }
+                            ),
+                        }
+                    }
+                ]
+            }
+        ).encode()
+
+        with patch(
+            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+        ):
+            findings = provider.generate("Review this change")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity.value, "error")
+        self.assertEqual(findings[0].title, "Case preservation violation")
 
     def test_structured_finding_is_normalized(self) -> None:
         finding = OpenAICompatibleInsightProvider._finding(

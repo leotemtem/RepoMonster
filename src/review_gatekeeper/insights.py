@@ -135,16 +135,27 @@ class OpenAICompatibleInsightProvider:
                 "Insight endpoint response is missing choices[0].message"
             ) from exc
         raw_content = message.get("content")
+        used_reasoning_content = False
         if not isinstance(raw_content, str) or not raw_content.strip():
-            detail = "Insight endpoint returned empty message.content"
-            if message.get("reasoning_content"):
-                detail += " after producing reasoning but no final answer"
-            raise InsightResponseError(detail)
+            raw_content = message.get("reasoning_content")
+            used_reasoning_content = True
+        if not isinstance(raw_content, str) or not raw_content.strip():
+            raise InsightResponseError(
+                "Insight endpoint returned empty message.content and no structured answer"
+            )
         content = raw_content.strip()
         if content.startswith("```"):
             content = content.removeprefix("```json").removeprefix("```")
             content = content.removesuffix("```").strip()
-        result = json.loads(content)
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as exc:
+            if used_reasoning_content:
+                raise InsightResponseError(
+                    "Insight endpoint returned empty message.content after producing "
+                    "reasoning but no valid structured final answer"
+                ) from exc
+            raise
         findings = result.get("findings") if isinstance(result, dict) else None
         if not isinstance(findings, list):
             raise InsightResponseError(
