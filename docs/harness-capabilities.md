@@ -162,7 +162,7 @@ Embedding and insight models can use:
 
 The worker must be able to reach both endpoints. RepoMonster does not distribute user credentials from repository configuration and does not expose the model endpoint to GitHub.
 
-For local models, review latency depends on model size, loaded context, hardware, and generated output. Set `INSIGHT_MAX_TOKENS` high enough for both reasoning and final structured findings, set `INSIGHT_TIMEOUT_SECONDS` above observed completion time, and keep `WEBHOOK_LOCK_TIMEOUT_SECONDS` comfortably larger than the full review duration.
+For local models, review latency depends on model size, loaded context, hardware, and generated output. Leave `INSIGHT_MAX_TOKENS` unset to avoid a RepoMonster-imposed generation ceiling, set `INSIGHT_TIMEOUT_SECONDS` above observed completion time, and keep `WEBHOOK_LOCK_TIMEOUT_SECONDS` comfortably larger than the full review duration.
 
 ## Safe extension points
 

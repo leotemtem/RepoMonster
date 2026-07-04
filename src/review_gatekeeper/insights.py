@@ -69,11 +69,11 @@ class OpenAICompatibleInsightProvider:
         model: str,
         api_key: str | None = None,
         timeout_seconds: int = 90,
-        max_tokens: int = 8192,
+        max_tokens: int | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("Insight timeout must be greater than zero")
-        if max_tokens <= 0:
+        if max_tokens is not None and max_tokens <= 0:
             raise ValueError("Insight max tokens must be greater than zero")
         self.endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
@@ -88,7 +88,11 @@ class OpenAICompatibleInsightProvider:
             model=os.environ["INSIGHT_MODEL"],
             api_key=os.getenv("INSIGHT_API_KEY"),
             timeout_seconds=int(os.getenv("INSIGHT_TIMEOUT_SECONDS", "90")),
-            max_tokens=int(os.getenv("INSIGHT_MAX_TOKENS", "8192")),
+            max_tokens=(
+                int(os.environ["INSIGHT_MAX_TOKENS"])
+                if os.getenv("INSIGHT_MAX_TOKENS")
+                else None
+            ),
         )
 
     def generate(self, review_brief: str) -> list[Finding]:
@@ -96,7 +100,6 @@ class OpenAICompatibleInsightProvider:
             "model": self.model,
             "temperature": 0,
             "stream": False,
-            "max_tokens": self.max_tokens,
             "response_format": FINDINGS_RESPONSE_FORMAT,
             "messages": [
                 {
@@ -112,6 +115,8 @@ class OpenAICompatibleInsightProvider:
                 {"role": "user", "content": review_brief},
             ],
         }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

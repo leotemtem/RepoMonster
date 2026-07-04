@@ -69,6 +69,23 @@ class InsightProviderTests(unittest.TestCase):
         self.assertEqual(provider.timeout_seconds, 900)
         self.assertEqual(provider.max_tokens, 16384)
 
+    def test_default_request_has_no_client_generation_limit(self) -> None:
+        provider = OpenAICompatibleInsightProvider(
+            "http://model.test/v1", "test-model"
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": '{"findings": []}'}}]}
+        ).encode()
+
+        with patch(
+            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+        ) as open_url:
+            provider.generate("Review this change")
+
+        request_payload = json.loads(open_url.call_args.args[0].data)
+        self.assertNotIn("max_tokens", request_payload)
+
     def test_reasoning_without_final_content_has_actionable_error(self) -> None:
         provider = OpenAICompatibleInsightProvider(
             "http://model.test/v1", "test-model"
