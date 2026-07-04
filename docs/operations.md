@@ -63,14 +63,23 @@ Embedding dimensions are unrelated to context length. They become part of the pg
 | `INSIGHT_MODEL` | when base URL is set | exact chat model identifier |
 | `INSIGHT_API_KEY` | endpoint-dependent | bearer token sent to the endpoint |
 | `INSIGHT_TIMEOUT_SECONDS` | no | model request timeout; defaults to 90 seconds |
+| `INSIGHT_MAX_TOKENS` | no | total generated-token allowance for reasoning and final findings; defaults to 8192 |
 
 Without `INSIGHT_BASE_URL`, RepoMonster runs deterministic checks only. When configured, insight failures result in manual escalation.
 
 Local models may need a larger timeout:
 
 ```dotenv
-INSIGHT_TIMEOUT_SECONDS=240
+INSIGHT_MAX_TOKENS=8192
+INSIGHT_TIMEOUT_SECONDS=900
+WEBHOOK_LOCK_TIMEOUT_SECONDS=1200
 ```
+
+Set these values in the deployment `.env` next to `docker-compose.yml`; do not
+commit that file. `INSIGHT_MAX_TOKENS` does not disable or separately cap model
+reasoning. It gives the request enough total generation space to reason and then
+emit the final structured findings. Keep the webhook lock timeout comfortably
+above the longest expected end-to-end review duration.
 
 The embedding and insight endpoints can share a base URL and API key, but they must use appropriate separate model identifiers.
 
@@ -397,7 +406,7 @@ Update to a release containing explicit nullable retrieval casts. This was fixed
 
 ### Insight endpoint timed out
 
-Increase `INSIGHT_TIMEOUT_SECONDS`, verify the model remains loaded, and ensure the worker lock timeout exceeds the full review duration. A timeout produces manual escalation rather than a pass.
+Increase `INSIGHT_TIMEOUT_SECONDS`, verify the model remains loaded, and ensure the worker lock timeout exceeds the full review duration. If the model uses all available generation on reasoning and returns an empty `message.content`, increase `INSIGHT_MAX_TOKENS` and confirm the loaded model has enough context for the prompt, reasoning, and final JSON. A timeout or missing final answer produces manual escalation rather than a pass.
 
 ### Model output has an invalid severity or evidence format
 

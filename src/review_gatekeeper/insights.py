@@ -8,6 +8,56 @@ from urllib import request as urlrequest
 from .models import Finding, Severity
 
 
+FINDINGS_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "review_findings",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "severity": {
+                                "type": "string",
+                                "enum": ["info", "warning", "error"],
+                            },
+                            "category": {"type": "string"},
+                            "title": {"type": "string"},
+                            "detail": {"type": "string"},
+                            "evidence": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "maxItems": 20,
+                            },
+                            "rule_id": {"type": ["string", "null"]},
+                        },
+                        "required": [
+                            "severity",
+                            "category",
+                            "title",
+                            "detail",
+                            "evidence",
+                            "rule_id",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+class InsightResponseError(ValueError):
+    """The insight endpoint returned no usable final response."""
+
+
 class InsightProvider(Protocol):
     def generate(self, review_brief: str) -> list[Finding]: ...
 
@@ -19,11 +69,17 @@ class OpenAICompatibleInsightProvider:
         model: str,
         api_key: str | None = None,
         timeout_seconds: int = 90,
+        max_tokens: int = 8192,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("Insight timeout must be greater than zero")
+        if max_tokens <= 0:
+            raise ValueError("Insight max tokens must be greater than zero")
         self.endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.max_tokens = max_tokens
 
     @classmethod
     def from_environment(cls) -> "OpenAICompatibleInsightProvider":
@@ -32,12 +88,16 @@ class OpenAICompatibleInsightProvider:
             model=os.environ["INSIGHT_MODEL"],
             api_key=os.getenv("INSIGHT_API_KEY"),
             timeout_seconds=int(os.getenv("INSIGHT_TIMEOUT_SECONDS", "90")),
+            max_tokens=int(os.getenv("INSIGHT_MAX_TOKENS", "8192")),
         )
 
     def generate(self, review_brief: str) -> list[Finding]:
         payload = {
             "model": self.model,
             "temperature": 0,
+            "stream": False,
+            "max_tokens": self.max_tokens,
+            "response_format": FINDINGS_RESPONSE_FORMAT,
             "messages": [
                 {
                     "role": "system",
@@ -63,12 +123,29 @@ class OpenAICompatibleInsightProvider:
         )
         with urlrequest.urlopen(req, timeout=self.timeout_seconds) as response:  # noqa: S310
             body = json.loads(response.read())
-        content = body["choices"][0]["message"]["content"].strip()
+        try:
+            message = body["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise InsightResponseError(
+                "Insight endpoint response is missing choices[0].message"
+            ) from exc
+        raw_content = message.get("content")
+        if not isinstance(raw_content, str) or not raw_content.strip():
+            detail = "Insight endpoint returned empty message.content"
+            if message.get("reasoning_content"):
+                detail += " after producing reasoning but no final answer"
+            raise InsightResponseError(detail)
+        content = raw_content.strip()
         if content.startswith("```"):
             content = content.removeprefix("```json").removeprefix("```")
             content = content.removesuffix("```").strip()
         result = json.loads(content)
-        return [self._finding(item) for item in result.get("findings", [])]
+        findings = result.get("findings") if isinstance(result, dict) else None
+        if not isinstance(findings, list):
+            raise InsightResponseError(
+                "Insight endpoint final response is missing a findings array"
+            )
+        return [self._finding(item) for item in findings]
 
     @staticmethod
     def _finding(payload: dict) -> Finding:
