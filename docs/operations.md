@@ -258,39 +258,334 @@ curl https://your-host.example/readyz
 
 Unknown JavaScript, CSS, login, and `robots.txt` requests are normally automated internet scans. A 404 response is expected.
 
-## Observability
+## Container operations
 
-Follow application logs:
+Run Compose commands from the directory containing `docker-compose.yml` and the
+deployment `.env` file.
+
+### Inspect container state
 
 ```bash
-docker compose logs -f api worker
+docker compose config --quiet
+docker compose ps --all
+docker compose top
 ```
 
-The API should return `202 Accepted` for valid GitHub webhook deliveries. The worker logs completion or an exception and attempt number.
+`config --quiet` validates the merged Compose configuration. `ps --all` includes
+the one-shot `bootstrap` container, which should normally be `Exited (0)` after
+startup. `postgres`, `api`, and `worker` should be running; PostgreSQL should also
+be healthy. Get the full PostgreSQL health-check result with:
 
-Inspect recent queue jobs:
+```bash
+docker inspect "$(docker compose ps -q postgres)" \
+  --format '{{json .State.Health}}'
+```
+
+Inspect live container resource use and Docker disk use:
+
+```bash
+docker stats --no-stream
+docker system df
+docker compose images
+```
+
+`docker system prune` is not a routine RepoMonster operation. Review its proposed
+deletions before using it, and never remove the `repomonster-data` volume unless
+database loss is intentional.
+
+### Read logs
+
+```bash
+docker compose logs --tail=200 --timestamps postgres bootstrap api worker
+docker compose logs --since=30m --timestamps api worker
+docker compose logs -f --tail=100 api worker
+```
+
+Follow only the worker when investigating review execution:
+
+```bash
+docker compose logs -f --tail=100 worker
+```
+
+The API should return `202 Accepted` for a valid GitHub delivery. The worker logs
+its startup, a delivery ID on completion, and the delivery ID plus attempt number
+and traceback on failure. Locate one delivery in retained worker logs with:
+
+```bash
+docker compose logs --since=24h worker | grep -F '<delivery-id>'
+```
+
+Docker logging configuration controls retention. Configure rotation in the Docker
+daemon or Compose logging settings before relying on container logs for historical
+auditing.
+
+### Restart or recreate services
+
+Use `restart` when the image and environment are unchanged:
+
+```bash
+docker compose restart api worker
+```
+
+Recreate a service after changing its environment, image, or mounted secret:
+
+```bash
+docker compose up -d --build --force-recreate api worker
+docker compose ps --all
+```
+
+Restart PostgreSQL only during a maintenance window. Stop API ingestion first and
+allow the worker to finish its current job:
+
+```bash
+docker compose stop api
+docker compose stop -t 180 worker
+docker compose restart postgres
+docker compose up -d api worker
+```
+
+The worker handles `SIGTERM` by finishing the job it is processing and then
+exiting. The Compose file allows three minutes for this. Increase
+`stop_grace_period` if reviews can take longer; forcibly killing a worker leaves
+its job in `processing` until `WEBHOOK_LOCK_TIMEOUT_SECONDS` elapses.
+
+### Run one-shot administrative containers
+
+Rerun migrations and bundled-pack synchronization with an ephemeral bootstrap
+container:
+
+```bash
+docker compose run --rm bootstrap
+```
+
+Run only one management operation by overriding that service's command:
+
+```bash
+docker compose run --rm bootstrap repomonster db migrate
+docker compose run --rm bootstrap repomonster standards sync
+```
+
+These commands use the deployment environment and internal database network. Do
+not run multiple migrations or reindexes concurrently. Migrations take a
+transaction-scoped advisory lock, but concurrent embedding and indexing work still
+adds avoidable load.
+
+## Database, worker, and job operations
+
+### Open the database operations console
+
+Open `psql` inside the database container. This uses the configured database name
+and user rather than assuming the defaults:
 
 ```bash
 docker compose exec postgres sh -lc \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-    SELECT delivery_id, event_name, status, attempts, last_error, created_at
-    FROM webhook_deliveries
-    ORDER BY id DESC
-    LIMIT 20;
-  "'
+  'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
-Inspect recent review outcomes:
+The queries below are read-only and can be pasted into that console. Use `\q` to
+exit. Avoid selecting the `payload`, `request_payload`, document body, or finding
+detail columns during routine checks because they can contain repository data.
+
+### Understand queue state and progress
+
+A webhook delivery follows this state model:
+
+```text
+pending -> processing -> completed
+                      -> ignored
+                      -> pending (retry scheduled)
+                      -> failed (attempts exhausted)
+```
+
+`attempts` increments when a worker claims a job. `available_at` is the time a
+pending retry becomes claimable. `locked_at` is when processing began.
+`external_result_id` is populated after the worker creates the GitHub Check Run.
+
+The queue does not record a percentage or the worker's current internal stage.
+For a processing job, use `locked_at`, `external_result_id`, worker logs, and the
+presence of a `review_runs` row as milestones. A `review_runs` row means the gate
+result was persisted; publication to GitHub happens immediately afterward.
+
+Summarize the whole queue:
+
+```sql
+SELECT status,
+       count(*) AS jobs,
+       min(created_at) AS oldest_created_at,
+       max(updated_at) AS last_updated_at
+FROM webhook_deliveries
+GROUP BY status
+ORDER BY status;
+```
+
+Inspect recent jobs without printing webhook bodies:
+
+```sql
+SELECT id,
+       delivery_id,
+       event_name,
+       status,
+       attempts,
+       available_at,
+       locked_at,
+       external_result_id,
+       left(last_error, 160) AS error,
+       created_at,
+       updated_at
+FROM webhook_deliveries
+ORDER BY id DESC
+LIMIT 20;
+```
+
+Focus on outstanding work and show how long it has waited or processed:
+
+```sql
+SELECT id,
+       delivery_id,
+       status,
+       attempts,
+       CASE
+         WHEN status = 'pending'
+           THEN greatest(available_at - now(), interval '0')
+       END AS retry_in,
+       CASE
+         WHEN status = 'processing' THEN now() - locked_at
+       END AS processing_for,
+       external_result_id,
+       left(last_error, 160) AS error
+FROM webhook_deliveries
+WHERE status IN ('pending', 'processing', 'failed')
+ORDER BY available_at, id;
+```
+
+Interpret the result as follows:
+
+| Observation | Meaning | Operator action |
+|---|---|---|
+| pending, `available_at <= now()` | ready for a worker | verify a worker is running and can reach PostgreSQL |
+| pending, `available_at > now()` | retry backoff | inspect `last_error`; fix the dependency before the next attempt |
+| processing, recent `locked_at` | worker owns the job | follow worker logs; allow the configured model timeout |
+| processing older than the lock timeout | worker may have died | verify worker/container state; a healthy worker will reclaim it |
+| failed | attempts exhausted | fix the cause and trigger a new PR event |
+| ignored | unsupported, draft, closed, or superseded work | no action unless the event should have been eligible |
+
+The worker reclaims stale `processing` rows automatically after
+`WEBHOOK_LOCK_TIMEOUT_SECONDS`. Do not manually unlock a live job: that can run the
+same delivery concurrently. This release has no supported cancel or requeue CLI.
+After a terminal failure, edit the PR description or push a commit to generate a
+new delivery; redelivery with the same provider delivery ID is deduplicated.
+
+### Inspect review outcomes
+
+Review runs are written after evidence gathering and review evaluation complete.
+Show recent results with finding counts:
+
+```sql
+SELECT rr.id,
+       rr.provider,
+       rr.repository_key,
+       rr.external_id,
+       left(rr.head_sha, 12) AS head_sha,
+       rr.gate_state,
+       count(rf.id) FILTER (WHERE rf.severity = 'error') AS errors,
+       count(rf.id) FILTER (WHERE rf.severity = 'warning') AS warnings,
+       count(rf.id) FILTER (WHERE rf.severity = 'info') AS info,
+       rr.created_at
+FROM review_runs AS rr
+LEFT JOIN review_findings AS rf ON rf.review_run_id = rr.id
+GROUP BY rr.id
+ORDER BY rr.id DESC
+LIMIT 20;
+```
+
+`external_id` is the provider's pull-request number. A completed queue job may
+legitimately have no `review_runs` row when it was ignored or when repository
+configuration failed before evaluation; inspect its GitHub Check Run and worker
+log in that case.
+
+### Inspect migrations and indexing
+
+Confirm the schema versions applied to this database:
+
+```sql
+SELECT version, applied_at
+FROM schema_migrations
+ORDER BY version;
+```
+
+Inspect standard-pack and repository-source indexing state:
+
+```sql
+SELECT status, count(*) AS pack_versions, max(updated_at) AS last_updated_at
+FROM standard_pack_versions
+GROUP BY status
+ORDER BY status;
+
+SELECT status, count(*) AS repository_sources, max(indexed_at) AS last_indexed_at
+FROM repository_standard_sources
+GROUP BY status
+ORDER BY status;
+```
+
+Any long-lived `indexing`, `pending`, or `failed` state warrants checking the
+`bootstrap` or worker logs and the embedding endpoint. `/readyz` requires database
+access and ready standard packs, but it does not prove that every repository source
+has indexed successfully.
+
+### Inspect PostgreSQL activity and size
+
+```sql
+SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;
+
+SELECT pid,
+       application_name,
+       state,
+       wait_event_type,
+       wait_event,
+       age(clock_timestamp(), query_start) AS runtime,
+       left(query, 120) AS query
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND pid <> pg_backend_pid()
+ORDER BY query_start;
+```
+
+Idle connections are normal. Investigate sessions that remain `active` or blocked
+for longer than the expected embedding, insight, or migration operation. Do not
+terminate a database backend until its owning container and transaction are
+identified.
+
+### Operate and scale workers
+
+Each worker processes one delivery at a time. PostgreSQL row locking with
+`FOR UPDATE SKIP LOCKED` allows multiple workers to consume different jobs safely:
 
 ```bash
-docker compose exec postgres sh -lc \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-    SELECT provider, repository_key, external_id, head_sha, gate_state, created_at
-    FROM review_runs
-    ORDER BY id DESC
-    LIMIT 20;
-  "'
+docker compose up -d --scale worker=2 worker
+docker compose ps worker
+docker compose logs -f --tail=100 worker
 ```
+
+Return to one worker with:
+
+```bash
+docker compose up -d --scale worker=1 worker
+```
+
+Scale only after confirming that the database, GitHub rate limit, embedding
+endpoint, and insight endpoint can handle the additional concurrency. More workers
+do not make a single review faster, and they do not bypass retry backoff.
+
+### Routine triage sequence
+
+When reviews appear stuck, check in this order:
+
+1. Run `docker compose ps --all`; verify PostgreSQL is healthy and a worker is running.
+2. Call `/readyz`; distinguish API/database readiness from worker execution.
+3. Query outstanding queue rows and note `delivery_id`, status, attempts, and age.
+4. Search worker logs for that delivery ID and read `last_error` in PostgreSQL.
+5. Verify GitHub and model endpoint connectivity from the worker's network context.
+6. Fix the dependency, then allow a scheduled retry or trigger a new PR event after terminal failure.
 
 ## Updating
 
@@ -341,19 +636,30 @@ review-gate examples/review_request.json
 
 ## Stopping and restarting
 
-Stop containers while preserving PostgreSQL data:
+For a planned shutdown, stop webhook ingestion, allow the worker to drain its
+current delivery, and then remove the containers:
 
 ```bash
+docker compose stop api
+docker compose stop -t 180 worker
 docker compose down
 ```
 
-Restart later:
+The named PostgreSQL volume is preserved. Restart the deployment and verify both
+the one-shot bootstrap result and long-running services:
 
 ```bash
 docker compose up -d
+docker compose ps --all
+docker compose logs --tail=100 bootstrap api worker
 ```
 
-Do not use `docker compose down -v` unless intentionally deleting the PostgreSQL volume and all indexed standards, repository knowledge, jobs, and review history.
+Use `docker compose stop <service>` and `docker compose start <service>` when a
+container should remain defined. Use `down` when the deployment's containers and
+default network should be removed.
+
+Do not use `docker compose down -v` unless intentionally deleting the PostgreSQL
+volume and all indexed standards, repository knowledge, jobs, and review history.
 
 Tailscale and a local model server can be stopped independently while RepoMonster is down. If SSH to the VPS itself uses Tailscale, stopping Tailscale on the VPS will terminate that access path.
 
