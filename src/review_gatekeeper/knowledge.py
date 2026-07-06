@@ -107,11 +107,7 @@ class RepositoryKnowledgeSynchronizer:
         installation_id: int | None,
         config: RepositoryConfig,
     ) -> int:
-        review_settings = {
-            "required_ci": config.required_ci,
-            "require_task_reference": config.require_task_reference,
-            "require_test_evidence": config.require_test_evidence,
-        }
+        review_settings = config.review_settings
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """

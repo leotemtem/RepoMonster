@@ -176,6 +176,8 @@ else
     -> ready_for_human_review
 ```
 
+After that base decision, an optional composite auto-block policy can upgrade a non-blocked result to `blocked`. The policy requires all configured conditions: a deterministic poor-PR-documentation signal, a model recommendation of `request_changes` or `block`, and at least one evidence-backed model warning or error at or above the configured impact threshold. `shadow` mode appends an informational audit finding without changing the base decision; `enforce` mode applies the upgrade. Raw warning counts and model recommendations by themselves are insufficient.
+
 An insight exception returns `manual_escalation` with the deterministic findings preserved. It does not fall through to a successful deterministic-only decision when an insight endpoint was configured but failed.
 
 ## Provider boundary

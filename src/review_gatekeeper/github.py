@@ -21,6 +21,7 @@ from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .models import (
     ChangedFile,
     ChangeRequestKind,
+    FindingImpact,
     GateState,
     Provider,
     ReviewRequest,
@@ -715,13 +716,16 @@ class GitHubReviewProcessor:
                 """
                 INSERT INTO review_runs (
                     repository_id, provider, repository_key, external_id, head_sha,
-                    profile_id, gate_state, request_payload, llm_brief
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    profile_id, gate_state, request_payload, llm_brief,
+                    insight_recommendation, insight_recommendation_reason
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                 ON CONFLICT (provider, repository_key, external_id, head_sha)
                 DO UPDATE SET profile_id = EXCLUDED.profile_id,
                               gate_state = EXCLUDED.gate_state,
                               request_payload = EXCLUDED.request_payload,
-                              llm_brief = EXCLUDED.llm_brief
+                              llm_brief = EXCLUDED.llm_brief,
+                              insight_recommendation = EXCLUDED.insight_recommendation,
+                              insight_recommendation_reason = EXCLUDED.insight_recommendation_reason
                 RETURNING id
                 """,
                 (
@@ -734,6 +738,12 @@ class GitHubReviewProcessor:
                     result.gate_state.value,
                     json.dumps(request.to_dict()),
                     result.llm_review_brief,
+                    (
+                        result.insight_recommendation.value
+                        if result.insight_recommendation is not None
+                        else None
+                    ),
+                    result.insight_recommendation_reason or None,
                 ),
             )
             run_id = int(cursor.fetchone()[0])
@@ -742,12 +752,14 @@ class GitHubReviewProcessor:
                 cursor.execute(
                     """
                     INSERT INTO review_findings (
-                        review_run_id, severity, rule_id, category, title, detail, evidence
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                        review_run_id, severity, impact, rule_id, category, title, detail,
+                        evidence
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                     """,
                     (
                         run_id,
                         finding.severity.value,
+                        finding.impact.value,
                         finding.rule_id,
                         finding.category,
                         finding.title,
@@ -874,7 +886,14 @@ def _format_findings(result) -> str:
         return "No findings."
     lines = []
     for finding in result.findings:
-        lines.append(f"### {finding.severity.value.upper()}: {finding.title}")
+        impact = (
+            f" / {finding.impact.value.upper()}"
+            if finding.impact != FindingImpact.ADVISORY
+            else ""
+        )
+        lines.append(
+            f"### {finding.severity.value.upper()}{impact}: {finding.title}"
+        )
         lines.append(finding.detail)
         if finding.evidence:
             lines.append("Evidence: " + ", ".join(finding.evidence[:10]))

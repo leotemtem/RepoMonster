@@ -487,6 +487,7 @@ SELECT rr.id,
        rr.external_id,
        left(rr.head_sha, 12) AS head_sha,
        rr.gate_state,
+       rr.insight_recommendation,
        count(rf.id) FILTER (WHERE rf.severity = 'error') AS errors,
        count(rf.id) FILTER (WHERE rf.severity = 'warning') AS warnings,
        count(rf.id) FILTER (WHERE rf.severity = 'info') AS info,
@@ -497,6 +498,28 @@ GROUP BY rr.id
 ORDER BY rr.id DESC
 LIMIT 20;
 ```
+
+When the auto-block policy is in `shadow` mode, inspect matches before enabling
+enforcement:
+
+```sql
+SELECT rr.repository_key,
+       rr.external_id,
+       rr.gate_state,
+       rr.insight_recommendation,
+       rr.insight_recommendation_reason,
+       rf.evidence AS significant_findings,
+       rr.created_at
+FROM review_runs AS rr
+JOIN review_findings AS rf ON rf.review_run_id = rr.id
+WHERE rf.rule_id = 'auto-block-shadow'
+ORDER BY rr.id DESC
+LIMIT 50;
+```
+
+Review these rows for false positives and evidence quality. Change a repository to
+`checks.auto_block.mode: enforce` only after the shadow decisions match maintainer
+expectations.
 
 `external_id` is the provider's pull-request number. A completed queue job may
 legitimately have no `review_runs` row when it was ignored or when repository

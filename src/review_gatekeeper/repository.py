@@ -126,6 +126,8 @@ class PostgresStandardsRepository:
             payload["require_test_evidence_when_code_changes"] = review_settings[
                 "require_test_evidence"
             ]
+        if "auto_block" in review_settings:
+            payload["auto_block"] = review_settings["auto_block"]
         return ReviewProfile.from_dict(payload)
 
     def retrieve(

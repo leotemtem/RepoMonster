@@ -112,6 +112,10 @@ checks:
   required_ci: [test, lint]
   require_task_reference: false
   require_test_evidence: true
+  auto_block:
+    mode: shadow
+    require_poor_documentation: true
+    minimum_model_impact: significant
 
 model:
   profile: default
@@ -129,10 +133,10 @@ The default profile applies these outcomes after deterministic and model finding
 |---|---|---|
 | Ready for human review | no errors and at most one warning | `success` |
 | Needs author updates | warnings exceed the profile tolerance | `action_required` |
-| Blocked | one or more errors | `action_required` |
+| Blocked | one or more errors, or a matching enforced auto-block policy | `action_required` |
 | Manual escalation | insight endpoint or result processing failed | `neutral` |
 
-Informational findings never block. The default profile tolerates one warning; profiles are deployment-owned policy files selected by repository configuration.
+Informational findings never block. The default profile tolerates one warning and evaluates the composite auto-block policy in shadow mode. Shadow mode records when the policy would match but cannot change the gate. Set `checks.auto_block.mode: enforce` only after reviewing shadow results. Profiles are deployment-owned policy files selected by repository configuration.
 
 ## Supported standard packs
 

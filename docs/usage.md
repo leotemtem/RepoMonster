@@ -54,6 +54,10 @@ checks:
   required_ci: []
   require_task_reference: false
   require_test_evidence: true
+  auto_block:
+    mode: shadow
+    require_poor_documentation: true
+    minimum_model_impact: significant
 
 model:
   profile: default
@@ -218,6 +222,26 @@ This setting controls readiness, not whether retrieval or model analysis runs.
 
 When `true`, source changes require a `Test Evidence` section. A source change with no obvious changed test file also produces a warning.
 
+### `checks.auto_block`
+
+Controls the optional composite policy that combines deterministic PR-documentation quality with the model's evidence-backed recommendation:
+
+```yaml
+checks:
+  auto_block:
+    mode: shadow # off, shadow, or enforce
+    require_poor_documentation: true
+    minimum_model_impact: significant # significant or blocking
+```
+
+- `off`: do not evaluate the composite policy
+- `shadow`: record an informational `auto-block-shadow` finding when the policy matches, without changing the gate
+- `enforce`: return `blocked` when the policy matches
+
+With `require_poor_documentation: true`, enforcement requires a deterministic PR-description finding such as missing required sections, missing test evidence, or weak written context for a large change. The model must also recommend `request_changes` or `block` and return at least one warning or error whose impact meets the configured threshold and whose evidence is non-empty. Model output alone cannot trigger this composite rule. Existing deterministic errors continue to block independently.
+
+Start in `shadow` and review false positives before enabling `enforce`. Insight timeouts, malformed output, and missing recommendations remain `manual_escalation`; they never become automatic blocks.
+
 ### `model.profile`
 
 Selects a deployment-owned JSON profile under `profiles/`. The repository can select a profile name but cannot define endpoint URLs, API keys, or arbitrary model settings.
@@ -228,6 +252,7 @@ The shipped `default` profile:
 - blocks on any error
 - permits at most one warning before requiring author updates
 - considers a change large at 400 changed lines
+- evaluates auto-block matches in shadow mode
 - retrieves task, repository, company, then public knowledge
 
 ## What the review evaluates
@@ -251,7 +276,7 @@ The model is asked to evaluate:
 - whether comments explain useful intent rather than restating code
 - whether the change should be blocked, updated, or sent to human review
 
-Model findings use `info`, `warning`, or `error` severity and participate in the same gate decision as deterministic findings.
+Model findings use `info`, `warning`, or `error` severity, classify impact as `advisory`, `significant`, or `blocking`, and include an overall `ready`, `request_changes`, or `block` recommendation. Findings participate in the normal gate decision; the recommendation only affects the optional composite auto-block policy when all deterministic and evidence requirements also match.
 
 ## Direct HTTP API
 
@@ -269,6 +294,7 @@ The response contains:
 - `gate_state`
 - `summary`
 - structured `findings`
+- the model's `insight_recommendation` and rationale when insight analysis ran
 - `applied_profile`
 - retrieved document IDs
 - the generated model review brief

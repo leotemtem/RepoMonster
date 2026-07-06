@@ -27,13 +27,16 @@ class InsightProviderTests(unittest.TestCase):
                                     "findings": [
                                         {
                                             "severity": "warning",
+                                            "impact": "significant",
                                             "category": "correctness",
                                             "title": "Contract mismatch",
                                             "detail": "The implementation changes case.",
                                             "evidence": ["app/main.py:12"],
                                             "rule_id": "contract-match",
                                         }
-                                    ]
+                                    ],
+                                    "recommendation": "request_changes",
+                                    "recommendation_reason": "The contract mismatch needs correction.",
                                 }
                             )
                         }
@@ -45,14 +48,15 @@ class InsightProviderTests(unittest.TestCase):
         with patch(
             "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
         ) as open_url:
-            findings = provider.generate("Review this change")
+            insight = provider.generate("Review this change")
 
         request_payload = json.loads(open_url.call_args.args[0].data)
         self.assertEqual(open_url.call_args.kwargs["timeout"], 900)
         self.assertEqual(request_payload["max_tokens"], 8192)
         self.assertFalse(request_payload["stream"])
         self.assertEqual(request_payload["response_format"]["type"], "json_schema")
-        self.assertEqual(findings[0].title, "Contract mismatch")
+        self.assertEqual(insight.findings[0].title, "Contract mismatch")
+        self.assertEqual(insight.recommendation.value, "request_changes")
 
     def test_environment_configures_timeout_and_generation_budget(self) -> None:
         with patch.dict(
@@ -75,7 +79,21 @@ class InsightProviderTests(unittest.TestCase):
         )
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
-            {"choices": [{"message": {"content": '{"findings": []}'}}]}
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "findings": [],
+                                    "recommendation": "ready",
+                                    "recommendation_reason": "No material issues found.",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
         ).encode()
 
         with patch(
@@ -127,13 +145,16 @@ class InsightProviderTests(unittest.TestCase):
                                     "findings": [
                                         {
                                             "severity": "error",
+                                            "impact": "blocking",
                                             "category": "contract_violation",
                                             "title": "Case preservation violation",
                                             "detail": "The implementation lowercases the name.",
                                             "evidence": ["name.lower()"],
                                             "rule_id": "case-preservation",
                                         }
-                                    ]
+                                    ],
+                                    "recommendation": "block",
+                                    "recommendation_reason": "The implementation violates the contract.",
                                 }
                             ),
                         }
@@ -145,11 +166,27 @@ class InsightProviderTests(unittest.TestCase):
         with patch(
             "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
         ):
-            findings = provider.generate("Review this change")
+            insight = provider.generate("Review this change")
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].severity.value, "error")
-        self.assertEqual(findings[0].title, "Case preservation violation")
+        self.assertEqual(len(insight.findings), 1)
+        self.assertEqual(insight.findings[0].severity.value, "error")
+        self.assertEqual(insight.findings[0].impact.value, "blocking")
+        self.assertEqual(insight.findings[0].title, "Case preservation violation")
+        self.assertEqual(insight.recommendation.value, "block")
+
+    def test_missing_recommendation_is_rejected(self) -> None:
+        provider = OpenAICompatibleInsightProvider(
+            "http://model.test/v1", "test-model"
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": '{"findings": []}'}}]}
+        ).encode()
+
+        with patch(
+            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+        ), self.assertRaisesRegex(InsightResponseError, "valid recommendation"):
+            provider.generate("Review this change")
 
     def test_structured_finding_is_normalized(self) -> None:
         finding = OpenAICompatibleInsightProvider._finding(

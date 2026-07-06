@@ -44,6 +44,60 @@ class RepositoryConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_repository_config(content)
 
+    def test_auto_block_policy_is_parsed(self) -> None:
+        config = load_repository_config(
+            """
+            version: 1
+            knowledge: {}
+            stacks:
+              - paths: ['**']
+                language: python
+                packs: ['python@1.0.0']
+            checks:
+              auto_block:
+                mode: enforce
+                require_poor_documentation: true
+                minimum_model_impact: significant
+            """
+        )
+
+        self.assertIsNotNone(config.auto_block)
+        self.assertEqual(config.auto_block.mode.value, "enforce")
+        self.assertEqual(config.auto_block.minimum_model_impact.value, "significant")
+        self.assertEqual(config.review_settings["auto_block"]["mode"], "enforce")
+
+    def test_invalid_auto_block_mode_is_rejected(self) -> None:
+        content = """
+        version: 1
+        knowledge: {}
+        stacks:
+          - paths: ['**']
+            language: python
+            packs: ['python@1.0.0']
+        checks:
+          auto_block:
+            mode: aggressive
+        """
+
+        with self.assertRaisesRegex(ValueError, "Invalid checks.auto_block policy"):
+            load_repository_config(content)
+
+    def test_advisory_auto_block_threshold_is_rejected(self) -> None:
+        content = """
+        version: 1
+        knowledge: {}
+        stacks:
+          - paths: ['**']
+            language: python
+            packs: ['python@1.0.0']
+        checks:
+          auto_block:
+            minimum_model_impact: advisory
+        """
+
+        with self.assertRaisesRegex(ValueError, "significant or blocking"):
+            load_repository_config(content)
+
 
 if __name__ == "__main__":
     unittest.main()

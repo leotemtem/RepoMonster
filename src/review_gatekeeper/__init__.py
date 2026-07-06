@@ -1,8 +1,13 @@
 from .models import (
+    AutoBlockMode,
+    AutoBlockPolicy,
     ChangedFile,
     ChangeRequestKind,
     Finding,
+    FindingImpact,
     GateState,
+    InsightRecommendation,
+    InsightResult,
     Provider,
     ReviewProfile,
     ReviewRequest,
@@ -14,10 +19,15 @@ from .models import (
 )
 
 __all__ = [
+    "AutoBlockMode",
+    "AutoBlockPolicy",
     "ChangedFile",
     "ChangeRequestKind",
     "Finding",
+    "FindingImpact",
     "GateState",
+    "InsightRecommendation",
+    "InsightResult",
     "Provider",
     "ReviewProfile",
     "ReviewRequest",

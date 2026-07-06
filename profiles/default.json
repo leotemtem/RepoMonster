@@ -11,6 +11,11 @@
   "require_test_evidence_when_code_changes": true,
   "max_warnings_for_ready": 1,
   "large_change_line_threshold": 400,
+  "auto_block": {
+    "mode": "shadow",
+    "require_poor_documentation": true,
+    "minimum_model_impact": "significant"
+  },
   "labels": {
     "ready": "ready-for-human-review",
     "rework": "needs-author-updates"

@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from .models import AutoBlockPolicy
+
 
 @dataclass(frozen=True, slots=True)
 class StackSelection:
@@ -35,6 +37,7 @@ class RepositoryConfig:
     require_task_reference: bool = True
     require_test_evidence: bool = True
     model_profile: str = "default"
+    auto_block: AutoBlockPolicy | None = None
 
     def stacks_for_path(self, path: str) -> list[StackSelection]:
         return [stack for stack in self.stacks if stack.matches(path)]
@@ -42,6 +45,17 @@ class RepositoryConfig:
     @property
     def selected_packs(self) -> list[str]:
         return list(dict.fromkeys(pack for stack in self.stacks for pack in stack.packs))
+
+    @property
+    def review_settings(self) -> dict[str, Any]:
+        settings: dict[str, Any] = {
+            "required_ci": self.required_ci,
+            "require_task_reference": self.require_task_reference,
+            "require_test_evidence": self.require_test_evidence,
+        }
+        if self.auto_block is not None:
+            settings["auto_block"] = self.auto_block.to_dict()
+        return settings
 
 
 def load_repository_config(content: str) -> RepositoryConfig:
@@ -82,6 +96,17 @@ def load_repository_config(content: str) -> RepositoryConfig:
         raise ValueError("At least one stack must be configured")
 
     checks = payload.get("checks", {})
+    auto_block_payload = checks.get("auto_block")
+    if auto_block_payload is not None and not isinstance(auto_block_payload, dict):
+        raise ValueError("checks.auto_block must be a mapping")
+    try:
+        auto_block = (
+            AutoBlockPolicy.from_dict(auto_block_payload)
+            if auto_block_payload is not None
+            else None
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid checks.auto_block policy: {exc}") from exc
     return RepositoryConfig(
         version=1,
         knowledge=knowledge,
@@ -90,6 +115,7 @@ def load_repository_config(content: str) -> RepositoryConfig:
         require_task_reference=bool(checks.get("require_task_reference", True)),
         require_test_evidence=bool(checks.get("require_test_evidence", True)),
         model_profile=str(model.get("profile", "default")),
+        auto_block=auto_block,
     )
 
 

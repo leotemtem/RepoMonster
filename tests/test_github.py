@@ -12,7 +12,16 @@ from review_gatekeeper.github import (
     verify_webhook_signature,
 )
 from review_gatekeeper.jobs import WebhookJob
-from review_gatekeeper.models import ChangedFile
+from review_gatekeeper.models import (
+    ChangedFile,
+    Finding,
+    FindingImpact,
+    GateState,
+    InsightRecommendation,
+    ReviewRequest,
+    ReviewResult,
+    Severity,
+)
 
 
 class GitHubIntegrationTests(unittest.TestCase):
@@ -102,6 +111,62 @@ stacks:
         self.assertEqual(queue.external_result_id, "9001")
         self.assertEqual(client.updated_checks[0]["conclusion"], "neutral")
 
+    def test_review_persistence_records_model_recommendation_and_impact(self) -> None:
+        connection = _PersistenceConnection()
+        processor = GitHubReviewProcessor(
+            database_url="unused",
+            queue=_FakeQueue(),
+            client=_FakeGitHubClient(head_sha="head"),
+            embedding_provider=object(),
+            review_service=object(),
+        )
+        processor._connect = lambda: connection
+        request = ReviewRequest.from_dict(
+            {
+                "provider": "github",
+                "change_kind": "pull_request",
+                "repository": "acme/api",
+                "repository_key": "github:https://github.com:123",
+                "external_id": "7",
+                "title": "Change",
+                "description": "Description",
+                "metadata": {"head_sha": "head"},
+            }
+        )
+        result = ReviewResult(
+            gate_state=GateState.BLOCKED,
+            summary="blocked",
+            findings=[
+                Finding(
+                    severity=Severity.WARNING,
+                    category="correctness",
+                    title="Mismatch",
+                    detail="The implementation does not match.",
+                    evidence=["app.py:1"],
+                    impact=FindingImpact.SIGNIFICANT,
+                )
+            ],
+            applied_profile="default",
+            retrieved_documents=[],
+            llm_review_brief="brief",
+            insight_recommendation=InsightRecommendation.REQUEST_CHANGES,
+            insight_recommendation_reason="Author changes are required.",
+        )
+
+        processor._persist_result(request, result)
+
+        review_insert = next(
+            item for item in connection.cursor_instance.executions
+            if "INSERT INTO review_runs" in item[0]
+        )
+        finding_insert = next(
+            item for item in connection.cursor_instance.executions
+            if "INSERT INTO review_findings" in item[0]
+        )
+        self.assertEqual(review_insert[1][-2], "request_changes")
+        self.assertEqual(review_insert[1][-1], "Author changes are required.")
+        self.assertEqual(finding_insert[1][2], "significant")
+
 
 class _FakeQueue:
     external_result_id: str | None = None
@@ -146,6 +211,44 @@ class _FakeGitHubClient:
     ) -> dict:
         self.updated_checks.append(payload)
         return {"id": check_run_id}
+
+
+class _PersistenceCursor:
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, tuple]] = []
+        self.result = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql, params) -> None:
+        self.executions.append((sql, params))
+        if "SELECT id FROM repositories" in sql:
+            self.result = (11,)
+        elif "INSERT INTO review_runs" in sql:
+            self.result = (22,)
+        else:
+            self.result = None
+
+    def fetchone(self):
+        return self.result
+
+
+class _PersistenceConnection:
+    def __init__(self) -> None:
+        self.cursor_instance = _PersistenceCursor()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def cursor(self):
+        return self.cursor_instance
 
 
 def _pull_request_job(*, head_sha: str) -> WebhookJob:

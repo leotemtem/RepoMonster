@@ -31,6 +31,7 @@ Typical policy:
 - tests and evidence required
 - public language/framework packs plus repository conventions
 - one warning tolerated, errors blocked
+- composite model/documentation auto-block evaluated in shadow mode before enforcement
 
 ### Internal engineering standards gate
 

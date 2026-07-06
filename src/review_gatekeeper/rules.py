@@ -60,6 +60,7 @@ class RuleEngine:
                     + ", ".join(missing)
                 ),
                 evidence=[request.title or request.external_id],
+                rule_id="pr-required-description-sections",
             )
         ]
 
@@ -113,6 +114,7 @@ class RuleEngine:
                         "The profile requires test evidence when source code changes, but none was documented."
                     ),
                     evidence=[request.title or request.external_id],
+                    rule_id="pr-test-evidence",
                 )
             )
 
@@ -134,6 +136,7 @@ class RuleEngine:
                     "The code churn is large relative to the written explanation. Reviewers will likely need more context."
                 ),
                 evidence=[f"total_churn={request.total_churn}"],
+                rule_id="pr-large-change-context",
             )
         ]
 

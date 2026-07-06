@@ -22,11 +22,65 @@ class Severity(str, Enum):
     ERROR = "error"
 
 
+class FindingImpact(str, Enum):
+    ADVISORY = "advisory"
+    SIGNIFICANT = "significant"
+    BLOCKING = "blocking"
+
+
+class InsightRecommendation(str, Enum):
+    READY = "ready"
+    REQUEST_CHANGES = "request_changes"
+    BLOCK = "block"
+
+
+class AutoBlockMode(str, Enum):
+    OFF = "off"
+    SHADOW = "shadow"
+    ENFORCE = "enforce"
+
+
 class GateState(str, Enum):
     BLOCKED = "blocked"
     NEEDS_AUTHOR_UPDATES = "needs_author_updates"
     READY_FOR_HUMAN_REVIEW = "ready_for_human_review"
     MANUAL_ESCALATION = "manual_escalation"
+
+
+@dataclass(frozen=True, slots=True)
+class AutoBlockPolicy:
+    mode: AutoBlockMode = AutoBlockMode.OFF
+    require_poor_documentation: bool = True
+    minimum_model_impact: FindingImpact = FindingImpact.SIGNIFICANT
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "AutoBlockPolicy":
+        payload = payload or {}
+        minimum_model_impact = FindingImpact(
+            str(
+                payload.get(
+                    "minimum_model_impact", FindingImpact.SIGNIFICANT.value
+                )
+            )
+        )
+        if minimum_model_impact == FindingImpact.ADVISORY:
+            raise ValueError(
+                "minimum_model_impact must be significant or blocking"
+            )
+        return cls(
+            mode=AutoBlockMode(str(payload.get("mode", AutoBlockMode.OFF.value))),
+            require_poor_documentation=bool(
+                payload.get("require_poor_documentation", True)
+            ),
+            minimum_model_impact=minimum_model_impact,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode.value,
+            "require_poor_documentation": self.require_poor_documentation,
+            "minimum_model_impact": self.minimum_model_impact.value,
+        }
 
 
 @dataclass(slots=True)
@@ -226,6 +280,7 @@ class ReviewProfile:
     labels: dict[str, str]
     retrieval_order: list[str]
     required_ci: list[str] = field(default_factory=list)
+    auto_block: AutoBlockPolicy = field(default_factory=AutoBlockPolicy)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ReviewProfile":
@@ -244,6 +299,7 @@ class ReviewProfile:
             labels=dict(payload.get("labels", {})),
             retrieval_order=list(payload.get("retrieval_order", [])),
             required_ci=list(payload.get("required_ci", [])),
+            auto_block=AutoBlockPolicy.from_dict(payload.get("auto_block")),
         )
 
 
@@ -255,6 +311,7 @@ class Finding:
     detail: str
     evidence: list[str] = field(default_factory=list)
     rule_id: str | None = None
+    impact: FindingImpact = FindingImpact.ADVISORY
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -264,7 +321,15 @@ class Finding:
             "detail": self.detail,
             "evidence": self.evidence,
             "rule_id": self.rule_id,
+            "impact": self.impact.value,
         }
+
+
+@dataclass(slots=True)
+class InsightResult:
+    findings: list[Finding]
+    recommendation: InsightRecommendation
+    recommendation_reason: str
 
 
 @dataclass(slots=True)
@@ -275,6 +340,8 @@ class ReviewResult:
     applied_profile: str
     retrieved_documents: list[str]
     llm_review_brief: str
+    insight_recommendation: InsightRecommendation | None = None
+    insight_recommendation_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -284,4 +351,10 @@ class ReviewResult:
             "applied_profile": self.applied_profile,
             "retrieved_documents": self.retrieved_documents,
             "llm_review_brief": self.llm_review_brief,
+            "insight_recommendation": (
+                self.insight_recommendation.value
+                if self.insight_recommendation is not None
+                else None
+            ),
+            "insight_recommendation_reason": self.insight_recommendation_reason,
         }
