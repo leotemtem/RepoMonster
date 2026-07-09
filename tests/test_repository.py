@@ -5,6 +5,7 @@ from pathlib import Path
 
 from review_gatekeeper.models import ReviewProfile, ReviewRequest
 from review_gatekeeper.repository import PostgresStandardsRepository, _vector_literal
+from review_gatekeeper.repository import OpenAICompatibleEmbeddingProvider
 
 
 class _EmbeddingProvider:
@@ -76,6 +77,10 @@ class _Connection:
 
 
 class PostgresRepositoryTests(unittest.TestCase):
+    def test_embedding_provider_rejects_non_http_base_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "EMBEDDING_BASE_URL must be an http"):
+            OpenAICompatibleEmbeddingProvider("file:///tmp/embedding", "test-model")
+
     def test_retrieval_filters_each_scope_before_vector_ranking(self) -> None:
         connection = _Connection()
         repository = PostgresStandardsRepository(

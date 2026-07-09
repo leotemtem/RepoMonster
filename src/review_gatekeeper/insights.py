@@ -12,6 +12,7 @@ from .models import (
     InsightResult,
     Severity,
 )
+from .url_safety import require_http_url
 
 
 FINDINGS_RESPONSE_FORMAT = {
@@ -91,7 +92,7 @@ class OpenAICompatibleInsightProvider:
             raise ValueError("Insight timeout must be greater than zero")
         if max_tokens is not None and max_tokens <= 0:
             raise ValueError("Insight max tokens must be greater than zero")
-        self.endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        self.endpoint = f"{require_http_url(base_url, setting_name='INSIGHT_BASE_URL')}/chat/completions"
         self.model = model
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
@@ -148,7 +149,9 @@ class OpenAICompatibleInsightProvider:
             headers=headers,
             method="POST",
         )
-        with urlrequest.urlopen(req, timeout=self.timeout_seconds) as response:  # noqa: S310
+        with urlrequest.urlopen(  # nosec B310  # noqa: S310 - Insight endpoint URL scheme is validated.
+            req, timeout=self.timeout_seconds
+        ) as response:
             body = json.loads(response.read())
         try:
             message = body["choices"][0]["message"]

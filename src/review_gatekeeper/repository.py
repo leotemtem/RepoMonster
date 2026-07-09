@@ -8,6 +8,7 @@ from typing import Protocol
 from urllib import request as urlrequest
 
 from .models import ReviewProfile, ReviewRequest, StandardDocument, StandardRule
+from .url_safety import require_http_url
 
 
 class StandardsRepository(Protocol):
@@ -39,7 +40,7 @@ class OpenAICompatibleEmbeddingProvider:
         dimensions: int = 1536,
         api_key: str | None = None,
     ) -> None:
-        self.endpoint = f"{base_url.rstrip('/')}/embeddings"
+        self.endpoint = f"{require_http_url(base_url, setting_name='EMBEDDING_BASE_URL')}/embeddings"
         self.model = model
         self.model_id = model
         self.dimensions = dimensions
@@ -62,7 +63,9 @@ class OpenAICompatibleEmbeddingProvider:
         req = urlrequest.Request(
             self.endpoint, data=payload, headers=headers, method="POST"
         )
-        with urlrequest.urlopen(req, timeout=30) as response:  # noqa: S310
+        with urlrequest.urlopen(  # nosec B310  # noqa: S310 - Embedding endpoint URL scheme is validated.
+            req, timeout=30
+        ) as response:
             body = json.loads(response.read())
         vectors = [
             item["embedding"] for item in sorted(body["data"], key=lambda x: x["index"])

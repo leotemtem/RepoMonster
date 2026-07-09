@@ -30,6 +30,7 @@ from .models import (
 from .providers import normalize_github_event
 from .repository import EmbeddingProvider
 from .service import ReviewService
+from .url_safety import require_http_url
 
 
 CHECK_NAME = "RepoMonster review gate"
@@ -63,6 +64,13 @@ class GitHubSettings:
     max_changed_files: int = 1000
     max_knowledge_files: int = 100
     max_knowledge_file_bytes: int = 500_000
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "api_url",
+            require_http_url(self.api_url, setting_name="GITHUB_API_URL"),
+        )
 
     @classmethod
     def from_environment(cls) -> "GitHubSettings":
@@ -301,7 +309,7 @@ class GitHubClient:
             self.settings.api_url + path, data=data, headers=headers, method=method
         )
         try:
-            with urlrequest.urlopen(  # noqa: S310
+            with urlrequest.urlopen(  # nosec B310  # noqa: S310 - GitHub API URL scheme is validated.
                 request, timeout=self.settings.request_timeout_seconds
             ) as response:
                 body = response.read()

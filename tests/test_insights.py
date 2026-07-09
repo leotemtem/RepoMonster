@@ -12,6 +12,10 @@ from review_gatekeeper.insights import (
 
 
 class InsightProviderTests(unittest.TestCase):
+    def test_insight_provider_rejects_non_http_base_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "INSIGHT_BASE_URL must be an http"):
+            OpenAICompatibleInsightProvider("file:///tmp/model", "test-model")
+
     def test_generate_requests_structured_output_with_configured_budget(self) -> None:
         provider = OpenAICompatibleInsightProvider(
             "http://model.test/v1",
