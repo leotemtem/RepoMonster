@@ -5,6 +5,7 @@ from pathlib import Path
 
 from review_gatekeeper.models import ReviewProfile, ReviewRequest
 from review_gatekeeper.repository import PostgresStandardsRepository, _vector_literal
+from review_gatekeeper.repository import OpenAICompatibleEmbeddingProvider
 
 
 class _EmbeddingProvider:
@@ -76,6 +77,10 @@ class _Connection:
 
 
 class PostgresRepositoryTests(unittest.TestCase):
+    def test_embedding_provider_rejects_non_http_base_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "EMBEDDING_BASE_URL must be an http"):
+            OpenAICompatibleEmbeddingProvider("file:///tmp/embedding", "test-model")
+
     def test_retrieval_filters_each_scope_before_vector_ranking(self) -> None:
         connection = _Connection()
         repository = PostgresStandardsRepository(
@@ -108,9 +113,15 @@ class PostgresRepositoryTests(unittest.TestCase):
             documents[0].retrieved_chunks,
             ["Use explicit response models for public APIs."],
         )
-        retrieval_queries = [item for item in connection.cursor_instance.executions if "standard_chunks" in item[0]]
+        retrieval_queries = [
+            item
+            for item in connection.cursor_instance.executions
+            if "standard_chunks" in item[0]
+        ]
         self.assertEqual([item[1][1] for item in retrieval_queries], ["repo", "public"])
-        self.assertTrue(all("ORDER BY c.embedding <=>" in item[0] for item in retrieval_queries))
+        self.assertTrue(
+            all("ORDER BY c.embedding <=>" in item[0] for item in retrieval_queries)
+        )
 
     def test_vector_literal_rejects_dimension_mismatch(self) -> None:
         with self.assertRaises(ValueError):

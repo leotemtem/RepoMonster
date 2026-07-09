@@ -57,16 +57,10 @@ class AutoBlockPolicy:
     def from_dict(cls, payload: dict[str, Any] | None) -> "AutoBlockPolicy":
         payload = payload or {}
         minimum_model_impact = FindingImpact(
-            str(
-                payload.get(
-                    "minimum_model_impact", FindingImpact.SIGNIFICANT.value
-                )
-            )
+            str(payload.get("minimum_model_impact", FindingImpact.SIGNIFICANT.value))
         )
         if minimum_model_impact == FindingImpact.ADVISORY:
-            raise ValueError(
-                "minimum_model_impact must be significant or blocking"
-            )
+            raise ValueError("minimum_model_impact must be significant or blocking")
         return cls(
             mode=AutoBlockMode(str(payload.get("mode", AutoBlockMode.OFF.value))),
             require_poor_documentation=bool(
@@ -123,7 +117,9 @@ class ChangedFile:
 
     def is_documentation_file(self) -> bool:
         lowered = self.path.lower()
-        return lowered.endswith(".md") or lowered.endswith(".mdx") or "/docs/" in lowered
+        return (
+            lowered.endswith(".md") or lowered.endswith(".mdx") or "/docs/" in lowered
+        )
 
     def is_source_file(self) -> bool:
         return not self.is_test_file() and not self.is_documentation_file()
@@ -173,9 +169,12 @@ class ReviewRequest:
             framework=payload.get("framework"),
             standard_packs=list(payload.get("standard_packs", [])),
             task_references=[
-                TaskReference.from_dict(item) for item in payload.get("task_references", [])
+                TaskReference.from_dict(item)
+                for item in payload.get("task_references", [])
             ],
-            changed_files=[ChangedFile.from_dict(item) for item in payload.get("changed_files", [])],
+            changed_files=[
+                ChangedFile.from_dict(item) for item in payload.get("changed_files", [])
+            ],
             metadata=payload.get("metadata", {}),
         )
 
@@ -287,7 +286,9 @@ class ReviewProfile:
         return cls(
             id=payload["id"],
             name=payload["name"],
-            required_description_sections=list(payload.get("required_description_sections", [])),
+            required_description_sections=list(
+                payload.get("required_description_sections", [])
+            ),
             require_task_reference_for_code_changes=bool(
                 payload.get("require_task_reference_for_code_changes", True)
             ),
@@ -295,7 +296,9 @@ class ReviewProfile:
                 payload.get("require_test_evidence_when_code_changes", True)
             ),
             max_warnings_for_ready=int(payload.get("max_warnings_for_ready", 1)),
-            large_change_line_threshold=int(payload.get("large_change_line_threshold", 400)),
+            large_change_line_threshold=int(
+                payload.get("large_change_line_threshold", 400)
+            ),
             labels=dict(payload.get("labels", {})),
             retrieval_order=list(payload.get("retrieval_order", [])),
             required_ci=list(payload.get("required_ci", [])),

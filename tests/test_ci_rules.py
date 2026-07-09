@@ -31,7 +31,9 @@ class RequiredCiRuleTests(unittest.TestCase):
 
         findings = RuleEngine().evaluate(request, profile, [])
 
-        self.assertTrue(any(item.category == "ci" and "lint" in item.title for item in findings))
+        self.assertTrue(
+            any(item.category == "ci" and "lint" in item.title for item in findings)
+        )
 
 
 if __name__ == "__main__":

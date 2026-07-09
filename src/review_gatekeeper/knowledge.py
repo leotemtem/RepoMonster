@@ -143,7 +143,9 @@ class RepositoryKnowledgeSynchronizer:
             )
             return int(cursor.fetchone()[0])
 
-    def _sync_pack_selections(self, repository_id: int, config: RepositoryConfig) -> None:
+    def _sync_pack_selections(
+        self, repository_id: int, config: RepositoryConfig
+    ) -> None:
         selections = [pack.rsplit("@", 1) for pack in config.selected_packs]
         with self.connection.cursor() as cursor:
             cursor.execute(
@@ -259,7 +261,9 @@ class RepositoryKnowledgeSynchronizer:
                     json.dumps({"source_type": source.source_type}),
                 ),
             )
-            cursor.execute("DELETE FROM standard_chunks WHERE document_id = %s", (document_id,))
+            cursor.execute(
+                "DELETE FROM standard_chunks WHERE document_id = %s", (document_id,)
+            )
             for ordinal, ((heading, content), vector) in enumerate(
                 zip(chunks, vectors, strict=True)
             ):
@@ -296,5 +300,11 @@ class RepositoryKnowledgeSynchronizer:
                         status = 'ready',
                         indexed_at = now()
                     """,
-                    (repository_id, source.path, source.source_sha, checksum, document_id),
+                    (
+                        repository_id,
+                        source.path,
+                        source.source_sha,
+                        checksum,
+                        document_id,
+                    ),
                 )

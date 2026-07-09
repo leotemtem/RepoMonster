@@ -47,7 +47,9 @@ def load_pack(manifest_path: Path) -> StandardPack:
     for item in manifest["documents"]:
         path = root / item["path"]
         if not path.is_file():
-            raise ValueError(f"{manifest_path}: document does not exist: {item['path']}")
+            raise ValueError(
+                f"{manifest_path}: document does not exist: {item['path']}"
+            )
         digest.update(item["path"].encode())
         digest.update(path.read_bytes())
         documents.append(
@@ -246,8 +248,12 @@ class PackSynchronizer:
                     checksum,
                 ),
             )
-            cursor.execute("DELETE FROM standard_chunks WHERE document_id = %s", (document_id,))
-            cursor.execute("DELETE FROM standard_rules WHERE document_id = %s", (document_id,))
+            cursor.execute(
+                "DELETE FROM standard_chunks WHERE document_id = %s", (document_id,)
+            )
+            cursor.execute(
+                "DELETE FROM standard_rules WHERE document_id = %s", (document_id,)
+            )
             for ordinal, ((heading, content), vector) in enumerate(
                 zip(chunks, vectors, strict=True)
             ):

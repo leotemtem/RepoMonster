@@ -11,17 +11,24 @@ class StandardPackTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         packs = discover_packs(root / "standard-packs")
 
-        self.assertEqual({item.id for item in packs}, {"python", "fastapi", "typescript", "node"})
+        self.assertEqual(
+            {item.id for item in packs}, {"python", "fastapi", "typescript", "node"}
+        )
         for pack in packs:
             self.assertEqual(pack.version, "1.0.0")
             self.assertTrue(pack.content_checksum)
             self.assertTrue(pack.manifest["sources"])
             self.assertTrue(
-                all(source["url"].startswith("https://") for source in pack.manifest["sources"])
+                all(
+                    source["url"].startswith("https://")
+                    for source in pack.manifest["sources"]
+                )
             )
 
     def test_markdown_is_chunked_by_review_topic(self) -> None:
-        chunks = chunk_markdown("# Title\nIntro\n\n## Contracts\nRules\n\n## Tests\nEvidence")
+        chunks = chunk_markdown(
+            "# Title\nIntro\n\n## Contracts\nRules\n\n## Tests\nEvidence"
+        )
 
         self.assertEqual(
             chunks,

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import unittest
+from pathlib import Path
 
 from review_gatekeeper.config import load_repository_config
 from review_gatekeeper.github import (
+    GitHubSettings,
     GitHubReviewProcessor,
     _decode_github_content,
     _github_issue_numbers,
@@ -25,6 +27,15 @@ from review_gatekeeper.models import (
 
 
 class GitHubIntegrationTests(unittest.TestCase):
+    def test_github_settings_rejects_non_http_api_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "GITHUB_API_URL must be an http"):
+            GitHubSettings(
+                app_id="1",
+                private_key_path=Path("github-app.pem"),
+                webhook_secret="secret",
+                api_url="file:///tmp/github",
+            )
+
     def test_webhook_signature_matches_github_test_vector(self) -> None:
         self.assertTrue(
             verify_webhook_signature(
@@ -156,11 +167,13 @@ stacks:
         processor._persist_result(request, result)
 
         review_insert = next(
-            item for item in connection.cursor_instance.executions
+            item
+            for item in connection.cursor_instance.executions
             if "INSERT INTO review_runs" in item[0]
         )
         finding_insert = next(
-            item for item in connection.cursor_instance.executions
+            item
+            for item in connection.cursor_instance.executions
             if "INSERT INTO review_findings" in item[0]
         )
         self.assertEqual(review_insert[1][-2], "request_changes")
