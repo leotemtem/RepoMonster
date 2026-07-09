@@ -41,7 +41,9 @@ class NormalizedWebhookEvent:
         }
 
 
-def normalize_github_event(event_name: str, payload: dict[str, Any]) -> NormalizedWebhookEvent:
+def normalize_github_event(
+    event_name: str, payload: dict[str, Any]
+) -> NormalizedWebhookEvent:
     repository = payload.get("repository", {})
     repository_id = str(repository.get("id", ""))
     provider_origin = _origin(repository.get("html_url")) or "https://github.com"
@@ -85,7 +87,9 @@ def normalize_github_event(event_name: str, payload: dict[str, Any]) -> Normaliz
     raise ValueError(f"Unsupported GitHub event: {event_name}")
 
 
-def normalize_gitlab_event(event_name: str, payload: dict[str, Any]) -> NormalizedWebhookEvent:
+def normalize_gitlab_event(
+    event_name: str, payload: dict[str, Any]
+) -> NormalizedWebhookEvent:
     lowered = event_name.lower().strip()
     project = payload.get("project", {})
     project_id = str(project.get("id") or payload.get("project_id") or "")

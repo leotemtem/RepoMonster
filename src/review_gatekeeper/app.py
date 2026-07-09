@@ -33,12 +33,16 @@ except ImportError:  # pragma: no cover
 
 def create_app() -> Any:
     if FastAPI is None:  # pragma: no cover
-        raise RuntimeError("Install optional web dependencies with: pip install -e '.[web]'")
+        raise RuntimeError(
+            "Install optional web dependencies with: pip install -e '.[web]'"
+        )
 
     root = project_root()
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
-        raise RuntimeError("DATABASE_URL is required; runtime standards retrieval uses PostgreSQL")
+        raise RuntimeError(
+            "DATABASE_URL is required; runtime standards retrieval uses PostgreSQL"
+        )
     insight_provider = (
         OpenAICompatibleInsightProvider.from_environment()
         if os.getenv("INSIGHT_BASE_URL")
@@ -78,7 +82,9 @@ def create_app() -> Any:
     ) -> dict[str, Any]:
         api_key = os.getenv("REPOMONSTER_API_KEY", "")
         if not api_key:
-            raise HTTPException(status_code=503, detail="Direct review endpoint is disabled")
+            raise HTTPException(
+                status_code=503, detail="Direct review endpoint is disabled"
+            )
         expected = f"Bearer {api_key}"
         if not hmac.compare_digest(expected, authorization):
             raise HTTPException(status_code=401, detail="Invalid API credentials")
@@ -97,17 +103,25 @@ def create_app() -> Any:
             raise HTTPException(status_code=413, detail="Webhook payload is too large")
         secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
         if not secret:
-            raise HTTPException(status_code=503, detail="GitHub webhook integration is not configured")
+            raise HTTPException(
+                status_code=503, detail="GitHub webhook integration is not configured"
+            )
         if not verify_webhook_signature(body, secret, x_hub_signature_256):
-            raise HTTPException(status_code=401, detail="Invalid GitHub webhook signature")
+            raise HTTPException(
+                status_code=401, detail="Invalid GitHub webhook signature"
+            )
         if not x_github_event or not x_github_delivery:
-            raise HTTPException(status_code=400, detail="Missing GitHub webhook headers")
+            raise HTTPException(
+                status_code=400, detail="Missing GitHub webhook headers"
+            )
         try:
             payload = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
         if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Webhook payload must be an object")
+            raise HTTPException(
+                status_code=400, detail="Webhook payload must be an object"
+            )
         if x_github_event == "ping":
             return {"received": True, "queued": False, "event": "ping"}
         if x_github_event != "pull_request":

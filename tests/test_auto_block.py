@@ -120,9 +120,7 @@ class AutoBlockPolicyTests(unittest.TestCase):
             any(item.rule_id == "auto-block-enforced" for item in result.findings)
         )
         self.assertEqual(result.insight_recommendation.value, "request_changes")
-        self.assertEqual(
-            result.to_dict()["insight_recommendation"], "request_changes"
-        )
+        self.assertEqual(result.to_dict()["insight_recommendation"], "request_changes")
 
     def test_good_pr_documentation_does_not_match_composite_policy(self) -> None:
         result = ReviewService(

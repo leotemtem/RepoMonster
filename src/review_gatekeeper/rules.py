@@ -64,7 +64,9 @@ class RuleEngine:
             )
         ]
 
-    def _check_task_reference(self, request: ReviewRequest, profile: ReviewProfile) -> list[Finding]:
+    def _check_task_reference(
+        self, request: ReviewRequest, profile: ReviewProfile
+    ) -> list[Finding]:
         if not profile.require_task_reference_for_code_changes:
             return []
         if not request.source_files:
@@ -83,7 +85,9 @@ class RuleEngine:
             )
         ]
 
-    def _check_tests(self, request: ReviewRequest, profile: ReviewProfile) -> list[Finding]:
+    def _check_tests(
+        self, request: ReviewRequest, profile: ReviewProfile
+    ) -> list[Finding]:
         if not profile.require_test_evidence_when_code_changes:
             return []
         if not request.source_files:
@@ -144,7 +148,10 @@ class RuleEngine:
         changed_api_paths = [
             item.path
             for item in request.source_files
-            if any(token in item.path.lower() for token in ("api", "route", "controller", "schema"))
+            if any(
+                token in item.path.lower()
+                for token in ("api", "route", "controller", "schema")
+            )
         ]
         if not changed_api_paths:
             return []
@@ -162,7 +169,9 @@ class RuleEngine:
             )
         ]
 
-    def _surface_retrieved_guidance(self, standards: list[StandardDocument]) -> list[Finding]:
+    def _surface_retrieved_guidance(
+        self, standards: list[StandardDocument]
+    ) -> list[Finding]:
         findings: list[Finding] = []
         for document in standards[:2]:
             findings.append(

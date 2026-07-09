@@ -30,6 +30,7 @@ from .models import (
 from .providers import normalize_github_event
 from .repository import EmbeddingProvider
 from .service import ReviewService
+from .url_safety import require_http_url
 
 
 CHECK_NAME = "RepoMonster review gate"
@@ -64,6 +65,13 @@ class GitHubSettings:
     max_knowledge_files: int = 100
     max_knowledge_file_bytes: int = 500_000
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "api_url",
+            require_http_url(self.api_url, setting_name="GITHUB_API_URL"),
+        )
+
     @classmethod
     def from_environment(cls) -> "GitHubSettings":
         required = {
@@ -73,7 +81,9 @@ class GitHubSettings:
         }
         missing = [name for name, value in required.items() if not value]
         if missing:
-            raise RuntimeError("Missing GitHub App configuration: " + ", ".join(missing))
+            raise RuntimeError(
+                "Missing GitHub App configuration: " + ", ".join(missing)
+            )
         return cls(
             app_id=required["GITHUB_APP_ID"],
             private_key_path=Path(required["GITHUB_PRIVATE_KEY_PATH"]),
@@ -114,14 +124,20 @@ class GitHubClient:
             payload={"repository_ids": [repository_id]},
         )
         token = str(response["token"])
-        expires_at = datetime.fromisoformat(str(response["expires_at"]).replace("Z", "+00:00"))
+        expires_at = datetime.fromisoformat(
+            str(response["expires_at"]).replace("Z", "+00:00")
+        )
         self._installation_tokens[cache_key] = (token, expires_at)
         return token
 
     def get_repository(self, full_name: str, token: str) -> dict[str, Any]:
-        return self._request("GET", f"/repos/{_repository_path(full_name)}", token=token)
+        return self._request(
+            "GET", f"/repos/{_repository_path(full_name)}", token=token
+        )
 
-    def get_pull_request(self, full_name: str, number: int, token: str) -> dict[str, Any]:
+    def get_pull_request(
+        self, full_name: str, number: int, token: str
+    ) -> dict[str, Any]:
         return self._request(
             "GET", f"/repos/{_repository_path(full_name)}/pulls/{number}", token=token
         )
@@ -136,7 +152,9 @@ class GitHubClient:
     def get_content(
         self, full_name: str, path: str, ref: str, token: str
     ) -> dict[str, Any]:
-        encoded_path = "/".join(urlparse.quote(part, safe="") for part in path.split("/"))
+        encoded_path = "/".join(
+            urlparse.quote(part, safe="") for part in path.split("/")
+        )
         query = urlparse.urlencode({"ref": ref})
         return self._request(
             "GET",
@@ -163,7 +181,9 @@ class GitHubClient:
             "GET", f"/repos/{_repository_path(full_name)}/issues/{number}", token=token
         )
 
-    def list_check_runs(self, full_name: str, ref: str, token: str) -> list[dict[str, Any]]:
+    def list_check_runs(
+        self, full_name: str, ref: str, token: str
+    ) -> list[dict[str, Any]]:
         response = self._request(
             "GET",
             f"/repos/{_repository_path(full_name)}/commits/{urlparse.quote(ref, safe='')}/check-runs?per_page=100",
@@ -201,7 +221,10 @@ class GitHubClient:
         if details_url:
             payload["details_url"] = details_url
         return self._request(
-            "POST", f"/repos/{_repository_path(full_name)}/check-runs", token=token, payload=payload
+            "POST",
+            f"/repos/{_repository_path(full_name)}/check-runs",
+            token=token,
+            payload=payload,
         )
 
     def update_check_run(
@@ -235,7 +258,9 @@ class GitHubClient:
         try:
             import jwt
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("PyJWT with cryptography support is required for GitHub Apps") from exc
+            raise RuntimeError(
+                "PyJWT with cryptography support is required for GitHub Apps"
+            ) from exc
         now = datetime.now(timezone.utc)
         private_key = self.settings.private_key_path.read_text()
         return jwt.encode(
@@ -284,13 +309,15 @@ class GitHubClient:
             self.settings.api_url + path, data=data, headers=headers, method=method
         )
         try:
-            with urlrequest.urlopen(  # noqa: S310
+            with urlrequest.urlopen(  # nosec B310  # noqa: S310 - GitHub API URL scheme is validated.
                 request, timeout=self.settings.request_timeout_seconds
             ) as response:
                 body = response.read()
         except urlerror.HTTPError as exc:
             detail = _api_error_detail(exc.read())
-            raise GitHubAPIError(exc.code, method, path.split("?", 1)[0], detail) from exc
+            raise GitHubAPIError(
+                exc.code, method, path.split("?", 1)[0], detail
+            ) from exc
         if not body:
             return None
         return json.loads(body)
@@ -324,12 +351,16 @@ class GitHubReviewProcessor:
         installation_id = int(normalized.installation_id or 0)
         pull_number = int(normalized.external_id)
         if not repository_id or not installation_id or not pull_number:
-            raise ValueError("GitHub pull request webhook is missing repository or installation identity")
+            raise ValueError(
+                "GitHub pull request webhook is missing repository or installation identity"
+            )
 
         token = self.client.installation_token(installation_id, repository_id)
         repository = self.client.get_repository(normalized.repository, token)
         if int(repository["id"]) != repository_id:
-            raise ValueError("GitHub repository identity changed during review preparation")
+            raise ValueError(
+                "GitHub repository identity changed during review preparation"
+            )
         full_name = str(repository["full_name"])
         pull_request = self.client.get_pull_request(full_name, pull_number, token)
         head_sha = str(pull_request["head"]["sha"])
@@ -421,7 +452,8 @@ class GitHubReviewProcessor:
         try:
             normalized = normalize_github_event(job.event_name, job.payload)
             token = self.client.installation_token(
-                int(normalized.installation_id or 0), int(normalized.repository_external_id)
+                int(normalized.installation_id or 0),
+                int(normalized.repository_external_id),
             )
             self.client.update_check_run(
                 normalized.repository,
@@ -452,7 +484,9 @@ class GitHubReviewProcessor:
         try:
             config = load_repository_config(config_content)
         except (TypeError, ValueError) as exc:
-            raise RepositoryConfigurationError(f"Invalid `.repomonster.yml`: {exc}") from exc
+            raise RepositoryConfigurationError(
+                f"Invalid `.repomonster.yml`: {exc}"
+            ) from exc
 
         sources = self._load_knowledge_sources(
             full_name=full_name,
@@ -480,9 +514,14 @@ class GitHubReviewProcessor:
             installation_db_id = self._upsert_installation(
                 connection,
                 external_id=installation_external_id,
-                namespace=str(repository.get("owner", {}).get("login") or full_name.split("/", 1)[0]),
+                namespace=str(
+                    repository.get("owner", {}).get("login")
+                    or full_name.split("/", 1)[0]
+                ),
             )
-            synchronizer = RepositoryKnowledgeSynchronizer(connection, self.embedding_provider)
+            synchronizer = RepositoryKnowledgeSynchronizer(
+                connection, self.embedding_provider
+            )
             synchronizer.sync(
                 provider="github",
                 provider_base_url=repository_origin,
@@ -524,7 +563,9 @@ class GitHubReviewProcessor:
             config.model_profile,
         )
 
-    def _load_config_blob(self, full_name: str, branch: str, token: str) -> dict[str, Any]:
+    def _load_config_blob(
+        self, full_name: str, branch: str, token: str
+    ) -> dict[str, Any]:
         try:
             blob = self.client.get_content(full_name, ".repomonster.yml", branch, token)
         except GitHubAPIError as exc:
@@ -534,7 +575,9 @@ class GitHubReviewProcessor:
                 ) from exc
             raise
         if isinstance(blob, list) or blob.get("type") != "file":
-            raise RepositoryConfigurationError("`.repomonster.yml` must be a regular file.")
+            raise RepositoryConfigurationError(
+                "`.repomonster.yml` must be a regular file."
+            )
         return blob
 
     def _load_knowledge_sources(
@@ -564,14 +607,19 @@ class GitHubReviewProcessor:
         missing_patterns: list[str] = []
         for source_type, patterns in patterns_by_type.items():
             for pattern in patterns:
-                matches = [(path, blob) for path, blob in blobs.items() if fnmatch(path, pattern)]
+                matches = [
+                    (path, blob)
+                    for path, blob in blobs.items()
+                    if fnmatch(path, pattern)
+                ]
                 if not matches:
                     missing_patterns.append(pattern)
                 for path, blob in matches:
                     selected.setdefault(path, (source_type, blob))
         if missing_patterns:
             raise RepositoryConfigurationError(
-                "Repository knowledge paths matched no files: " + ", ".join(missing_patterns)
+                "Repository knowledge paths matched no files: "
+                + ", ".join(missing_patterns)
             )
         if len(selected) > self.client.settings.max_knowledge_files:
             raise RepositoryConfigurationError(
@@ -634,7 +682,9 @@ class GitHubReviewProcessor:
                         path=f"issues/{number}.md",
                         title=f"GitHub issue #{number}: {issue.get('title') or ''}",
                         content=content,
-                        source_sha=str(issue.get("updated_at") or issue.get("id") or number),
+                        source_sha=str(
+                            issue.get("updated_at") or issue.get("id") or number
+                        ),
                         source_type="task",
                     ),
                 )
@@ -643,7 +693,9 @@ class GitHubReviewProcessor:
             references.append(TaskReference(kind="ticket", value=ticket))
         return references, sources
 
-    def _changed_files(self, full_name: str, number: int, token: str) -> list[ChangedFile]:
+    def _changed_files(
+        self, full_name: str, number: int, token: str
+    ) -> list[ChangedFile]:
         files = self.client.list_pull_request_files(full_name, number, token)
         if len(files) > self.client.settings.max_changed_files:
             raise RepositoryConfigurationError(
@@ -675,7 +727,9 @@ class GitHubReviewProcessor:
             name = str(check.get("name") or "")
             if not name or name == CHECK_NAME:
                 continue
-            checks[name] = str(check.get("conclusion") or check.get("status") or "unknown")
+            checks[name] = str(
+                check.get("conclusion") or check.get("status") or "unknown"
+            )
         status = self.client.combined_status(full_name, head_sha, token)
         for item in status.get("statuses", []):
             context = str(item.get("context") or "")
@@ -683,7 +737,9 @@ class GitHubReviewProcessor:
                 checks[context] = str(item.get("state") or "unknown")
         return checks
 
-    def _upsert_installation(self, connection, *, external_id: int, namespace: str) -> int:
+    def _upsert_installation(
+        self, connection, *, external_id: int, namespace: str
+    ) -> int:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -747,7 +803,9 @@ class GitHubReviewProcessor:
                 ),
             )
             run_id = int(cursor.fetchone()[0])
-            cursor.execute("DELETE FROM review_findings WHERE review_run_id = %s", (run_id,))
+            cursor.execute(
+                "DELETE FROM review_findings WHERE review_run_id = %s", (run_id,)
+            )
             for finding in result.findings:
                 cursor.execute(
                     """
@@ -772,19 +830,27 @@ class GitHubReviewProcessor:
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install database dependencies with: pip install -e '.[db]'") from exc
+            raise RuntimeError(
+                "Install database dependencies with: pip install -e '.[db]'"
+            ) from exc
         return psycopg.connect(self.database_url)
 
 
 def _decode_github_content(payload: dict[str, Any]) -> str:
-    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
-        raise RepositoryConfigurationError("GitHub returned unsupported repository content encoding.")
+    if payload.get("encoding") != "base64" or not isinstance(
+        payload.get("content"), str
+    ):
+        raise RepositoryConfigurationError(
+            "GitHub returned unsupported repository content encoding."
+        )
     try:
         encoded = "".join(payload["content"].split())
         decoded = base64.b64decode(encoded, validate=True)
         return decoded.decode("utf-8")
     except (ValueError, UnicodeDecodeError) as exc:
-        raise RepositoryConfigurationError("Repository knowledge must be valid UTF-8 text.") from exc
+        raise RepositoryConfigurationError(
+            "Repository knowledge must be valid UTF-8 text."
+        ) from exc
 
 
 def _repository_path(full_name: str) -> str:
@@ -796,7 +862,11 @@ def _repository_path(full_name: str) -> str:
 
 def _repository_origin(repository: dict[str, Any]) -> str:
     parsed = urlparse.urlsplit(str(repository.get("html_url") or "https://github.com"))
-    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://github.com"
+    return (
+        f"{parsed.scheme}://{parsed.netloc}"
+        if parsed.scheme and parsed.netloc
+        else "https://github.com"
+    )
 
 
 def _provider_origin_from_api(api_url: str) -> str:
@@ -822,7 +892,9 @@ def _select_stack(
         for changed_file in changed_files:
             if changed_file.language:
                 language_weights[changed_file.language] = (
-                    language_weights.get(changed_file.language, 0) + changed_file.churn + 1
+                    language_weights.get(changed_file.language, 0)
+                    + changed_file.churn
+                    + 1
                 )
         language = (
             max(language_weights, key=lambda language: language_weights[language])
@@ -838,7 +910,9 @@ def _github_issue_numbers(text: str, full_name: str) -> list[int]:
     numbers = [int(value) for value in re.findall(r"(?<![\w])#(\d+)\b", text)]
     owner, repository = (re.escape(part) for part in full_name.split("/", 1))
     url_pattern = rf"https?://github\.com/{owner}/{repository}/issues/(\d+)\b"
-    numbers.extend(int(value) for value in re.findall(url_pattern, text, flags=re.IGNORECASE))
+    numbers.extend(
+        int(value) for value in re.findall(url_pattern, text, flags=re.IGNORECASE)
+    )
     return list(dict.fromkeys(numbers))
 
 
@@ -895,9 +969,7 @@ def _format_findings(result) -> str:
             if finding.impact != FindingImpact.ADVISORY
             else ""
         )
-        lines.append(
-            f"### {finding.severity.value.upper()}{impact}: {finding.title}"
-        )
+        lines.append(f"### {finding.severity.value.upper()}{impact}: {finding.title}")
         lines.append(finding.detail)
         if finding.evidence:
             lines.append("Evidence: " + ", ".join(finding.evidence[:10]))

@@ -14,7 +14,9 @@ class RepositoryConfigTests(unittest.TestCase):
         )
 
         self.assertEqual(config.selected_packs, ["python@1.0.0", "fastapi@1.0.0"])
-        self.assertEqual(config.stacks_for_path("app/routes/payments.py")[0].framework, "fastapi")
+        self.assertEqual(
+            config.stacks_for_path("app/routes/payments.py")[0].framework, "fastapi"
+        )
 
     def test_repository_cannot_define_model_endpoint_or_api_key(self) -> None:
         content = """

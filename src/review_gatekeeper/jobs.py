@@ -34,7 +34,9 @@ class WebhookQueue:
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install database dependencies with: pip install -e '.[db]'") from exc
+            raise RuntimeError(
+                "Install database dependencies with: pip install -e '.[db]'"
+            ) from exc
         return psycopg.connect(self.database_url)
 
     def enqueue(
@@ -110,7 +112,7 @@ class WebhookQueue:
     def fail(self, job: WebhookJob, error: Exception) -> bool:
         """Record a failure and return True when no retries remain."""
         exhausted = job.attempts >= self.max_attempts
-        delay = min(300, 2 ** job.attempts)
+        delay = min(300, 2**job.attempts)
         message = f"{type(error).__name__}: {error}"[:4000]
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
