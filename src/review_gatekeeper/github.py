@@ -824,9 +824,13 @@ def _select_stack(
                 language_weights[changed_file.language] = (
                     language_weights.get(changed_file.language, 0) + changed_file.churn + 1
                 )
-        language = max(language_weights, key=language_weights.get) if language_weights else None
+        language = (
+            max(language_weights, key=lambda language: language_weights[language])
+            if language_weights
+            else None
+        )
         return language, None, []
-    language, framework = max(weights, key=weights.get)
+    language, framework = max(weights, key=lambda stack: weights[stack])
     return language, framework, list(dict.fromkeys(packs))
 
 

@@ -208,7 +208,7 @@ class ReviewRequest:
             seen[item.language] = seen.get(item.language, 0) + item.churn + 1
         if not seen:
             return None
-        return max(seen, key=seen.get)
+        return max(seen, key=lambda language: seen[language])
 
     def resolved_repository_key(self) -> str:
         if self.repository_key:
