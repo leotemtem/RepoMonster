@@ -5,7 +5,10 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from review_gatekeeper.insights import InsightResponseError, OpenAICompatibleInsightProvider
+from review_gatekeeper.insights import (
+    InsightResponseError,
+    OpenAICompatibleInsightProvider,
+)
 
 
 class InsightProviderTests(unittest.TestCase):
@@ -74,9 +77,7 @@ class InsightProviderTests(unittest.TestCase):
         self.assertEqual(provider.max_tokens, 16384)
 
     def test_default_request_has_no_client_generation_limit(self) -> None:
-        provider = OpenAICompatibleInsightProvider(
-            "http://model.test/v1", "test-model"
-        )
+        provider = OpenAICompatibleInsightProvider("http://model.test/v1", "test-model")
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
             {
@@ -105,9 +106,7 @@ class InsightProviderTests(unittest.TestCase):
         self.assertNotIn("max_tokens", request_payload)
 
     def test_reasoning_without_final_content_has_actionable_error(self) -> None:
-        provider = OpenAICompatibleInsightProvider(
-            "http://model.test/v1", "test-model"
-        )
+        provider = OpenAICompatibleInsightProvider("http://model.test/v1", "test-model")
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
             {
@@ -122,17 +121,18 @@ class InsightProviderTests(unittest.TestCase):
             }
         ).encode()
 
-        with patch(
-            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
-        ), self.assertRaisesRegex(
-            InsightResponseError, "reasoning but no valid structured final answer"
+        with (
+            patch(
+                "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+            ),
+            self.assertRaisesRegex(
+                InsightResponseError, "reasoning but no valid structured final answer"
+            ),
         ):
             provider.generate("Review this change")
 
     def test_complete_structured_reasoning_is_used_when_content_is_empty(self) -> None:
-        provider = OpenAICompatibleInsightProvider(
-            "http://model.test/v1", "test-model"
-        )
+        provider = OpenAICompatibleInsightProvider("http://model.test/v1", "test-model")
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
             {
@@ -175,17 +175,18 @@ class InsightProviderTests(unittest.TestCase):
         self.assertEqual(insight.recommendation.value, "block")
 
     def test_missing_recommendation_is_rejected(self) -> None:
-        provider = OpenAICompatibleInsightProvider(
-            "http://model.test/v1", "test-model"
-        )
+        provider = OpenAICompatibleInsightProvider("http://model.test/v1", "test-model")
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
             {"choices": [{"message": {"content": '{"findings": []}'}}]}
         ).encode()
 
-        with patch(
-            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
-        ), self.assertRaisesRegex(InsightResponseError, "valid recommendation"):
+        with (
+            patch(
+                "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+            ),
+            self.assertRaisesRegex(InsightResponseError, "valid recommendation"),
+        ):
             provider.generate("Review this change")
 
     def test_structured_finding_is_normalized(self) -> None:

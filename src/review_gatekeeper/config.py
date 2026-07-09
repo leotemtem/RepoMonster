@@ -44,7 +44,9 @@ class RepositoryConfig:
 
     @property
     def selected_packs(self) -> list[str]:
-        return list(dict.fromkeys(pack for stack in self.stacks for pack in stack.packs))
+        return list(
+            dict.fromkeys(pack for stack in self.stacks for pack in stack.packs)
+        )
 
     @property
     def review_settings(self) -> dict[str, Any]:
@@ -88,7 +90,9 @@ def load_repository_config(content: str) -> RepositoryConfig:
             StackSelection(
                 paths=paths,
                 language=str(item["language"]).lower(),
-                framework=(str(item["framework"]).lower() if item.get("framework") else None),
+                framework=(
+                    str(item["framework"]).lower() if item.get("framework") else None
+                ),
                 packs=packs,
             )
         )
@@ -124,5 +128,7 @@ def _validated_paths(value: Any) -> list[str]:
     for item in values:
         path = PurePosixPath(str(item))
         if path.is_absolute() or ".." in path.parts:
-            raise ValueError(f"Repository knowledge path must stay inside the repository: {item}")
+            raise ValueError(
+                f"Repository knowledge path must stay inside the repository: {item}"
+            )
     return [str(item) for item in values]

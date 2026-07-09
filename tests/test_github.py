@@ -156,11 +156,13 @@ stacks:
         processor._persist_result(request, result)
 
         review_insert = next(
-            item for item in connection.cursor_instance.executions
+            item
+            for item in connection.cursor_instance.executions
             if "INSERT INTO review_runs" in item[0]
         )
         finding_insert = next(
-            item for item in connection.cursor_instance.executions
+            item
+            for item in connection.cursor_instance.executions
             if "INSERT INTO review_findings" in item[0]
         )
         self.assertEqual(review_insert[1][-2], "request_changes")

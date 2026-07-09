@@ -108,9 +108,15 @@ class PostgresRepositoryTests(unittest.TestCase):
             documents[0].retrieved_chunks,
             ["Use explicit response models for public APIs."],
         )
-        retrieval_queries = [item for item in connection.cursor_instance.executions if "standard_chunks" in item[0]]
+        retrieval_queries = [
+            item
+            for item in connection.cursor_instance.executions
+            if "standard_chunks" in item[0]
+        ]
         self.assertEqual([item[1][1] for item in retrieval_queries], ["repo", "public"])
-        self.assertTrue(all("ORDER BY c.embedding <=>" in item[0] for item in retrieval_queries))
+        self.assertTrue(
+            all("ORDER BY c.embedding <=>" in item[0] for item in retrieval_queries)
+        )
 
     def test_vector_literal_rejects_dimension_mismatch(self) -> None:
         with self.assertRaises(ValueError):

@@ -59,10 +59,14 @@ class OpenAICompatibleEmbeddingProvider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        req = urlrequest.Request(self.endpoint, data=payload, headers=headers, method="POST")
+        req = urlrequest.Request(
+            self.endpoint, data=payload, headers=headers, method="POST"
+        )
         with urlrequest.urlopen(req, timeout=30) as response:  # noqa: S310
             body = json.loads(response.read())
-        vectors = [item["embedding"] for item in sorted(body["data"], key=lambda x: x["index"])]
+        vectors = [
+            item["embedding"] for item in sorted(body["data"], key=lambda x: x["index"])
+        ]
         for vector in vectors:
             if len(vector) != self.dimensions:
                 raise ValueError(
@@ -90,7 +94,9 @@ class PostgresStandardsRepository:
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install database dependencies with: pip install -e '.[db]'") from exc
+            raise RuntimeError(
+                "Install database dependencies with: pip install -e '.[db]'"
+            ) from exc
         return psycopg.connect(self.database_url)
 
     def load_profile(
@@ -133,8 +139,12 @@ class PostgresStandardsRepository:
     def retrieve(
         self, request: ReviewRequest, profile: ReviewProfile, limit: int = 12
     ) -> list[StandardDocument]:
-        query_vector = self.embedding_provider.embed([self._retrieval_query(request)])[0]
-        vector_literal = _vector_literal(query_vector, self.embedding_provider.dimensions)
+        query_vector = self.embedding_provider.embed([self._retrieval_query(request)])[
+            0
+        ]
+        vector_literal = _vector_literal(
+            query_vector, self.embedding_provider.dimensions
+        )
         language = (request.inferred_language() or "").lower() or None
         framework = (request.framework or "").lower() or None
         task_keys = [item.value for item in request.task_references]
@@ -297,7 +307,10 @@ class BundledPackRepository:
                         tags=document.tags,
                         source_links=source_links,
                         rules=[StandardRule.from_dict(item) for item in document.rules],
-                        retrieved_chunks=[content for _, content in chunk_markdown(document.path.read_text())],
+                        retrieved_chunks=[
+                            content
+                            for _, content in chunk_markdown(document.path.read_text())
+                        ],
                     )
                 )
         return documents
@@ -314,7 +327,11 @@ class BundledPackRepository:
                 continue
             if document.language and language and document.language.lower() != language:
                 continue
-            if document.framework and framework and document.framework.lower() != framework:
+            if (
+                document.framework
+                and framework
+                and document.framework.lower() != framework
+            ):
                 continue
             pack_id = document.id.split(":", 2)[1]
             if selected and pack_id not in selected:
@@ -326,7 +343,9 @@ class BundledPackRepository:
 
 def _vector_literal(vector: list[float], expected_dimensions: int) -> str:
     if len(vector) != expected_dimensions:
-        raise ValueError(f"Expected {expected_dimensions} embedding dimensions, got {len(vector)}")
+        raise ValueError(
+            f"Expected {expected_dimensions} embedding dimensions, got {len(vector)}"
+        )
     if any(not math.isfinite(value) for value in vector):
         raise ValueError("Embedding contains a non-finite value")
     return "[" + ",".join(format(value, ".12g") for value in vector) + "]"

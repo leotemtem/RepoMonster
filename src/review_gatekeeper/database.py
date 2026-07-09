@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 class DatabaseMigrator:
-    def __init__(self, database_url: str, migrations_root: Path, embedding_dimensions: int) -> None:
+    def __init__(
+        self, database_url: str, migrations_root: Path, embedding_dimensions: int
+    ) -> None:
         self.database_url = database_url
         self.migrations_root = migrations_root
         self.embedding_dimensions = embedding_dimensions
@@ -15,7 +17,9 @@ class DatabaseMigrator:
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install database dependencies with: pip install -e '.[db]'") from exc
+            raise RuntimeError(
+                "Install database dependencies with: pip install -e '.[db]'"
+            ) from exc
 
         applied: list[str] = []
         paths = sorted(self.migrations_root.glob("[0-9][0-9][0-9]_*.sql"))
@@ -24,7 +28,9 @@ class DatabaseMigrator:
 
         with psycopg.connect(self.database_url) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_xact_lock(hashtext('repomonster:migrations'))")
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('repomonster:migrations'))"
+                )
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -46,7 +52,9 @@ class DatabaseMigrator:
                     checksum = hashlib.sha256(rendered_sql.encode()).hexdigest()
                     if version in existing:
                         if existing[version] != checksum:
-                            raise RuntimeError(f"Applied migration {version} has been modified")
+                            raise RuntimeError(
+                                f"Applied migration {version} has been modified"
+                            )
                         continue
                     cursor.execute(rendered_sql)
                     cursor.execute(

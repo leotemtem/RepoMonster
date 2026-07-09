@@ -23,7 +23,9 @@ def _connect():
     try:
         import psycopg
     except ImportError as exc:
-        raise RuntimeError("Install database dependencies with: pip install -e '.[db]'") from exc
+        raise RuntimeError(
+            "Install database dependencies with: pip install -e '.[db]'"
+        ) from exc
     return psycopg.connect(os.environ["DATABASE_URL"])
 
 
@@ -56,9 +58,7 @@ def _sync(force: bool) -> int:
                 "EMBEDDING_DIMENSIONS does not match the initialized database "
                 f"({provider.dimensions} != {configured_dimensions})"
             )
-        changed = PackSynchronizer(
-            connection, provider
-        ).sync(packs, force=force)
+        changed = PackSynchronizer(connection, provider).sync(packs, force=force)
     print("standard packs updated: " + (", ".join(changed) if changed else "none"))
     return 0
 
@@ -188,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     db_commands = db.add_subparsers(dest="db_command", required=True)
     db_commands.add_parser("migrate")
     standards = commands.add_parser("standards")
-    standard_commands = standards.add_subparsers(dest="standards_command", required=True)
+    standard_commands = standards.add_subparsers(
+        dest="standards_command", required=True
+    )
     standard_commands.add_parser("sync")
     standard_commands.add_parser("reindex")
     repository = commands.add_parser("repository")

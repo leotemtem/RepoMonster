@@ -40,7 +40,9 @@ class ReviewService:
         self.rule_engine = rule_engine or RuleEngine()
         self.insight_provider = insight_provider
 
-    def review(self, request: ReviewRequest, profile_id: str = "default") -> ReviewResult:
+    def review(
+        self, request: ReviewRequest, profile_id: str = "default"
+    ) -> ReviewResult:
         profile = self.repository.load_profile(profile_id, request)
         applied_profile = profile.id
         standards = self.repository.retrieve(request, profile)
@@ -99,11 +101,15 @@ class ReviewService:
                 insight_result.recommendation if insight_result is not None else None
             ),
             insight_recommendation_reason=(
-                insight_result.recommendation_reason if insight_result is not None else ""
+                insight_result.recommendation_reason
+                if insight_result is not None
+                else ""
             ),
         )
 
-    def _decide(self, findings: list[Finding], max_warnings_for_ready: int) -> GateState:
+    def _decide(
+        self, findings: list[Finding], max_warnings_for_ready: int
+    ) -> GateState:
         errors = sum(1 for item in findings if item.severity == Severity.ERROR)
         warnings = sum(1 for item in findings if item.severity == Severity.WARNING)
         if errors:
@@ -178,7 +184,9 @@ class ReviewService:
 
     def _build_llm_brief(self, request, profile_id, standards, findings) -> str:
         lines: list[str] = []
-        lines.append("You are reviewing whether this change is ready for human maintainer review.")
+        lines.append(
+            "You are reviewing whether this change is ready for human maintainer review."
+        )
         lines.append("")
         lines.append(f"Profile: {profile_id}")
         lines.append(f"Provider: {request.provider.value}")
@@ -223,9 +231,7 @@ class ReviewService:
         for document in standards[:5]:
             lines.append(
                 f"- [{document.scope}] {document.title}"
-                + (
-                    f" ({document.language or 'n/a'} / {document.framework or 'n/a'})"
-                )
+                + (f" ({document.language or 'n/a'} / {document.framework or 'n/a'})")
             )
             for rule in document.rules[:3]:
                 lines.append(f"  - {rule.title}: {rule.rationale}")
@@ -239,11 +245,19 @@ class ReviewService:
             )
         lines.append("")
         lines.append("Questions for the model:")
-        lines.append("1. Does the implementation match the stated task and acceptance criteria?")
-        lines.append("2. Is the solution professionally structured for the language/framework used?")
+        lines.append(
+            "1. Does the implementation match the stated task and acceptance criteria?"
+        )
+        lines.append(
+            "2. Is the solution professionally structured for the language/framework used?"
+        )
         lines.append("3. Is the code easy for another engineer to follow?")
         lines.append("4. Are the comments helpful, sparse, and focused on why?")
-        lines.append("5. Should this be blocked, sent back to the author, or marked ready for human review?")
+        lines.append(
+            "5. Should this be blocked, sent back to the author, or marked ready for human review?"
+        )
         lines.append("")
-        lines.append("Return structured findings with severity, evidence, and an overall decision.")
+        lines.append(
+            "Return structured findings with severity, evidence, and an overall decision."
+        )
         return "\n".join(lines)

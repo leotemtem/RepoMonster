@@ -218,5 +218,7 @@ class OpenAICompatibleInsightProvider:
             detail=str(payload["detail"]),
             evidence=evidence[:20],
             rule_id=(str(payload["rule_id"]) if payload.get("rule_id") else None),
-            impact=FindingImpact(str(payload.get("impact", "advisory")).strip().lower()),
+            impact=FindingImpact(
+                str(payload.get("impact", "advisory")).strip().lower()
+            ),
         )

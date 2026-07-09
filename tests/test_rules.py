@@ -40,15 +40,15 @@ class ReviewGatekeeperTests(unittest.TestCase):
                         "path": "app/api/routes/capture.py",
                         "language": "python",
                         "additions": 30,
-                        "deletions": 5
+                        "deletions": 5,
                     },
                     {
                         "path": "tests/api/test_capture.py",
                         "language": "python",
                         "additions": 40,
-                        "deletions": 0
-                    }
-                ]
+                        "deletions": 0,
+                    },
+                ],
             }
         )
 
@@ -71,9 +71,9 @@ class ReviewGatekeeperTests(unittest.TestCase):
                         "path": "app/services/capture.py",
                         "language": "python",
                         "additions": 12,
-                        "deletions": 3
+                        "deletions": 3,
                     }
-                ]
+                ],
             }
         )
 
@@ -101,21 +101,23 @@ class ReviewGatekeeperTests(unittest.TestCase):
                         "path": "app/middleware/auth.py",
                         "language": "python",
                         "additions": 22,
-                        "deletions": 9
+                        "deletions": 9,
                     },
                     {
                         "path": "tests/test_auth.py",
                         "language": "python",
                         "additions": 18,
-                        "deletions": 2
-                    }
-                ]
+                        "deletions": 2,
+                    },
+                ],
             }
         )
 
         result = build_service().review(request)
         self.assertEqual(result.gate_state.value, "blocked")
-        self.assertTrue(any(item.category == "traceability" for item in result.findings))
+        self.assertTrue(
+            any(item.category == "traceability" for item in result.findings)
+        )
 
 
 if __name__ == "__main__":
