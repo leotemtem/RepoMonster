@@ -35,7 +35,7 @@ class DatabaseMigrator:
                     """
                 )
                 cursor.execute("SELECT version, checksum FROM schema_migrations")
-                existing = dict(cursor.fetchall())
+                existing: dict[str, str] = dict(cursor.fetchall())
 
                 for path in paths:
                     version = path.name.split("_", 1)[0]

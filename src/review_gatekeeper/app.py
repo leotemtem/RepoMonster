@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .models import ReviewRequest
 from .insights import OpenAICompatibleInsightProvider
@@ -14,16 +14,24 @@ from .providers import normalize_gitlab_event
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
 from .service import ReviewService
 
+if TYPE_CHECKING:
+    from fastapi import Request
+else:  # pragma: no cover
+    Request = Any
+
+FastAPI: Any
+Header: Any
+HTTPException: Any
+
 try:
-    from fastapi import FastAPI, Header, HTTPException, Request
+    from fastapi import FastAPI, Header, HTTPException
 except ImportError:  # pragma: no cover
     FastAPI = None
     Header = None
     HTTPException = None
-    Request = Any
 
 
-def create_app():
+def create_app() -> Any:
     if FastAPI is None:  # pragma: no cover
         raise RuntimeError("Install optional web dependencies with: pip install -e '.[web]'")
 
@@ -36,15 +44,13 @@ def create_app():
         if os.getenv("INSIGHT_BASE_URL")
         else None
     )
-    service = ReviewService(
-        PostgresStandardsRepository(
-            database_url=database_url,
-            embedding_provider=OpenAICompatibleEmbeddingProvider.from_environment(),
-            profiles_root=root / "profiles",
-            tenant_key=os.getenv("TENANT_KEY"),
-        ),
-        insight_provider=insight_provider,
+    repository = PostgresStandardsRepository(
+        database_url=database_url,
+        embedding_provider=OpenAICompatibleEmbeddingProvider.from_environment(),
+        profiles_root=root / "profiles",
+        tenant_key=os.getenv("TENANT_KEY"),
     )
+    service = ReviewService(repository, insight_provider=insight_provider)
     webhook_queue = WebhookQueue(database_url)
     app = FastAPI(title="Review Gatekeeper", version="0.1.0")
 
@@ -58,7 +64,7 @@ def create_app():
 
     @app.get("/readyz")
     async def readyz() -> dict[str, Any]:
-        with service.repository._connect() as connection, connection.cursor() as cursor:
+        with repository._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT count(*) FROM standard_pack_versions WHERE status = 'ready'"
             )
