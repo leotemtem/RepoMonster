@@ -7,3 +7,12 @@ venv_*/
 .env
 .pytest_cache/
 .mypy_cache/
+
+# Private agentic workflow — kept local, never published
+/CLAUDE.md
+/AGENTS.md
+/PROJECT.md
+/TECHSTACK.md
+/TASK.md
+/.claude/
+/.mcp.json

@@ -175,3 +175,16 @@ More detail is available in [Architecture](docs/architecture.md).
 ## Project boundary
 
 RepoMonster currently publishes one summary Check Run. It does not yet publish inline annotations, submit GitHub review decisions, add labels, merge pull requests, execute linters, read PR comments, or provide a complete GitLab workflow. These boundaries are deliberate and documented in [Harness capabilities](docs/harness-capabilities.md).
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development
+setup, the required checks, and the trust boundaries to preserve. Participation is
+governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+To report a security vulnerability, follow the [security policy](SECURITY.md) and
+use private reporting rather than a public issue.
+
+## License
+
+RepoMonster is released under the [MIT License](LICENSE).
