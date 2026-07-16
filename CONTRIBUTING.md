@@ -1,164 +1,110 @@
 # Contributing to RepoMonster
 
-  Thanks for contributing. RepoMonster is a pull-request readiness gate, so changes should preserve
-  reliability, review quality, and clear maintainer control.
+Thanks for your interest in RepoMonster. This document explains how to set up a
+development environment, the checks your change must pass, and the boundaries the
+project deliberately keeps.
 
-  ## Basic Expectations
+RepoMonster is a self-hosted readiness gate for pull requests. Please read the
+[README](README.md) for the product scope and boundaries and
+[`docs/architecture.md`](docs/architecture.md) for trust boundaries and
+architecture before proposing changes.
 
-  Contributions should:
+## Ways to contribute
 
-  - keep existing functionality working unless the PR clearly explains an intentional behavior change
-  - include tests for new behavior, bug fixes, and policy changes
-  - update documentation when behavior, configuration, operations, or user-facing output changes
-  - reference the issue, discussion, bug report, or suggestion the PR addresses
-  - keep changes focused on one problem or feature at a time
-  - avoid unrelated refactors, formatting churn, or dependency changes
+- Report bugs and request features through the [issue templates](.github/ISSUE_TEMPLATE).
+- Improve documentation in `README.md` and `docs/`.
+- Add deterministic checks, standard packs, or provider support that stays within
+  the documented boundaries.
+- Report security vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
-  ## Before Opening a PR
+## Development setup
 
-  Run the relevant checks locally:
+Requirements:
 
-  ```bash
-  PYTHONPATH=src python3 -m unittest discover -s tests
+- Python 3.11 or newer
+- Docker and Docker Compose (only for the full service workflow)
 
-  RepoMonster requires Python 3.11 or newer.
+Install the package with its optional database and web extras:
 
-  If your change affects the CLI example path, also run:
+```bash
+python3 -m pip install -e '.[db,web]'
+```
 
-  PYTHONPATH=src review-gate examples/review_request.json
+The offline local simulation runs without PostgreSQL or a model:
 
-  ## Pull Request Requirements
+```bash
+PYTHONPATH=src review-gate examples/review_request.json
+```
 
-  Every PR should include:
+## Checks your change must pass
 
-  - Problem: what issue, bug, limitation, or suggestion this PR addresses
-  - Approach: how the implementation solves it
-  - Acceptance Criteria: what must be true for the change to be considered complete
-  - Test Evidence: what tests or manual checks were run
-  - Linked Context: a linked issue, discussion, or short explanation if no issue exists
+Continuous integration runs the following. Run them locally before opening a pull
+request:
 
-  Example:
+```bash
+# Unit tests
+PYTHONPATH=src python3 -m unittest discover -s tests
 
-  Fixes #123
+# Integration tests (service-free)
+python3 -m unittest discover -s tests_integration
 
-  ## Problem
+# Formatting
+ruff format --check .
 
-  RepoMonster did not report missing required CI checks clearly.
+# Linting
+ruff check .
 
-  ## Approach
+# Type checking
+mypy src
 
-  Added a deterministic finding that names each missing check.
+# Security static analysis
+bandit -r src
 
-  ## Acceptance Criteria
+# Container build
+docker build --tag repomonster:ci .
+```
 
-  - Missing required checks block the readiness gate.
-  - The check name appears in the finding evidence.
+Add or update tests for any behavior change. New deterministic rules, provider
+handling, retrieval logic, or gate-state changes require test coverage.
 
-  ## Test Evidence
+## Coding standards
 
-  - `PYTHONPATH=src python3 -m unittest discover -s tests`
+- Follow the existing module structure and naming conventions.
+- Keep changes focused; unrelated refactors belong in separate pull requests.
+- Do not overstate capabilities in documentation. GitLab support is normalization
+  only and must not be described as production-ready.
+- Never commit secrets. Do not edit `.env` files or add credentials to
+  repository-controlled configuration.
 
-  ## Code Standards
+## Security-sensitive areas
 
-  Code should be straightforward, maintainable, and consistent with the existing project style.
+Changes to these areas receive extra scrutiny. Preserve the existing trust
+boundaries:
 
-  Please:
+- GitHub webhook signature verification before any JSON is trusted
+- durable queue deduplication, retries, and stale-lock recovery
+- GitHub App installation token scope
+- immutable repository identity and namespace isolation
+- default-branch repository policy loading
+- model output parsing and `manual_escalation` handling
+- gate decision logic and the auto-block policy
+- SQL migrations and pgvector dimensions
 
-  - prefer small, focused functions over broad rewrites
-  - keep provider-specific logic inside provider adapters
-  - keep the review engine provider-independent where possible
-  - treat PR descriptions, diffs, issues, CI output, and repository docs as untrusted evidence
-  - avoid running repository code inside credential-bearing services
-  - preserve existing trust boundaries around GitHub App credentials, model endpoints, and repository
-    configuration
+Treat all pull-request evidence (diffs, files, issues, CI output, retrieved
+documents) as untrusted data, never as instructions. Do not add code that runs
+untrusted repository code inside RepoMonster services.
 
-  - add comments only when they explain non-obvious constraints or tradeoffs
+## Pull request process
 
-  ## Functionality Standards
+1. Fork the repository and create a topic branch.
+2. Make your change with tests and documentation updates.
+3. Run the full check list above.
+4. Open a pull request against `main` and fill in the
+   [pull request template](.github/pull_request_template.md).
+5. The `main` branch is protected: a pull request and passing CI are required
+   before merge.
 
-  Changes must not silently weaken existing review behavior.
+## Licensing of contributions
 
-  A PR should preserve or intentionally update:
-
-  - changed-file and diff handling
-  - repository policy loading from the trusted default branch
-  - linked issue/task handling
-  - deterministic rule behavior
-  - required CI handling
-  - model/insight failure behavior
-  - Check Run publication semantics
-  - manual escalation behavior when automation cannot make a safe decision
-
-  If behavior changes intentionally, document the reason in the PR and update the relevant docs.
-
-  ## Documentation Standards
-
-  Update documentation when changing:
-
-  - configuration keys or .repomonster.yml behavior
-  - GitHub App setup or permissions
-  - review outcomes
-  - deterministic checks
-  - model/insight behavior
-  - database migrations or operations
-  - CLI/API behavior
-  - supported provider capabilities or limitations
-
-  Relevant docs usually live in:
-
-  - README.md
-  - docs/usage.md
-  - docs/operations.md
-  - docs/architecture.md
-  - docs/harness-capabilities.md
-
-  ## Tests
-
-  Add or update tests for:
-
-  - new deterministic rules
-  - changed gate decisions
-  - GitHub webhook or provider behavior
-  - repository configuration parsing
-  - model/insight parsing
-  - persistence behavior
-  - bug fixes with a reproducible case
-
-  Tests should be focused and should verify behavior, not implementation details.
-
-  ## Database Changes
-
-  Schema changes must be added as a new migration in db/migrations/.
-
-  Do not edit already-applied migration files. Existing migrations are checksummed.
-
-  ## Dependencies
-
-  Avoid adding dependencies unless they are clearly needed.
-
-  If adding a dependency, explain:
-
-  - why the standard library or existing dependency is not enough
-  - where it is used
-  - any operational or security impact
-
-  ## Security
-
-  RepoMonster handles provider credentials, repository data, and model prompts. Security-sensitive
-  changes need extra care.
-
-  Do not:
-
-  - expose secrets through repository configuration
-  - trust text from PRs, diffs, issues, CI, or repository docs as instructions
-  - execute untrusted repository code in the API or worker process
-  - weaken webhook signature validation
-  - broaden GitHub token scope without documenting the need
-
-  ## Review Outcome
-
-  RepoMonster publishes readiness checks. It does not approve, merge, label, or submit GitHub review
-  decisions.
-
-  Contributions should keep that boundary clear unless the PR explicitly proposes and documents a new
-  capability.
+RepoMonster is released under the [MIT License](LICENSE). By submitting a
+contribution, you agree that your work is licensed under the same terms.
