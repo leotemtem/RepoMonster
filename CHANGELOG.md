@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue templates, and a protected `main`
   branch ruleset.
 
+### Changed
+
+- Recorded MIT licensing in `pyproject.toml` project metadata.
+
 ## [0.1.0]
 
 ### Added
