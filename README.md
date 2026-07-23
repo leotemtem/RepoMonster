@@ -6,6 +6,8 @@ RepoMonster is a self-hosted readiness gate for pull requests. It combines deter
 
 RepoMonster does not approve or merge code. A successful check means that the change supplied enough evidence and did not produce blocking findings; responsibility remains with the maintainer.
 
+RepoMonster is application-layer developer tooling, not Infrastructure as a Service. It does not rent or manage raw compute, storage, or networking for users. Teams run it themselves as part of their review workflow; if offered as a hosted product, it would be closer to Software as a Service than IaaS.
+
 ## Current status
 
 The complete automated workflow currently supports GitHub pull requests through a GitHub App:
