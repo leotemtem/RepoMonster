@@ -86,6 +86,12 @@ def should_queue_event(event: str, payload: dict[str, Any], app_id: str) -> bool
         return str((check_run.get("app") or {}).get("id")) != app_id
     if event == "status":
         return payload.get("state") != "pending"
+    if event == "push":
+        default_branch = (payload.get("repository") or {}).get("default_branch")
+        return bool(default_branch) and (
+            payload.get("ref") == f"refs/heads/{default_branch}"
+            and payload.get("deleted") is not True
+        )
     return False
 
 
@@ -147,7 +153,69 @@ class GitHubReviewProcessor:
             return self._process_ci_event(job)
         if job.event_name == CI_WAIT_EVENT:
             return self._process_ci_wait_expiry(job)
+        if job.event_name == "push":
+            return self._process_push(job)
         return False
+
+    def _knowledge_sync_key(self, repository: dict[str, Any], token: str) -> str:
+        # Observe the branch before loading policy or knowledge. A branch move can
+        # leave an older key, which forces another sync on the next delivery.
+        tree_sha = self.client.get_branch_tree_sha(
+            str(repository["full_name"]), str(repository["default_branch"]), token
+        )
+        return json.dumps(
+            [
+                tree_sha,
+                self.embedding_provider.model_id,
+                self.embedding_provider.dimensions,
+                max_chunks_per_source(),
+            ]
+        )
+
+    def _knowledge_cache_matches(self, repository_key: str, sync_key: str) -> bool:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT knowledge_sync_key FROM repositories WHERE repository_key = %s",
+                (repository_key,),
+            )
+            row = cursor.fetchone()
+        return row is not None and row[0] == sync_key
+
+    def _process_push(self, job: WebhookJob) -> bool:
+        if not should_queue_event("push", job.payload, self.client.settings.app_id):
+            return False
+        repository, token, installation_id = self._authenticated_repository(job.payload)
+        # Verify the branch against authoritative repository metadata as well.
+        if job.payload.get("ref") != f"refs/heads/{repository['default_branch']}":
+            return False
+        sync_key = self._knowledge_sync_key(repository, token)
+        repository_key = f"github:{_repository_origin(repository)}:{repository['id']}"
+        if self._knowledge_cache_matches(repository_key, sync_key):
+            return True
+        try:
+            config_blob, config = self._load_policy(
+                str(repository["full_name"]), str(repository["default_branch"]), token
+            )
+            sources = self._load_knowledge_sources(
+                full_name=str(repository["full_name"]),
+                default_branch=str(repository["default_branch"]),
+                token=token,
+                config=config,
+            )
+        except RepositoryConfigurationError:
+            # PR reviews publish configuration errors; pushes never publish checks.
+            return False
+        self._sync_knowledge(
+            job=job,
+            repository=repository,
+            installation_external_id=installation_id,
+            config_blob=config_blob,
+            config=config,
+            sources=sources,
+            task_sources=[],
+            sync_key=sync_key,
+        )
+        return True
 
     def _process_pull_request_delivery(self, job: WebhookJob) -> bool:
         if job.payload.get("action") not in SUPPORTED_PULL_REQUEST_ACTIONS:
@@ -438,6 +506,7 @@ class GitHubReviewProcessor:
         full_name = str(repository["full_name"])
         head_sha = str(pull_request["head"]["sha"])
         try:
+            sync_key = self._knowledge_sync_key(repository, token)
             config_blob, config = self._load_policy(
                 full_name, str(repository["default_branch"]), token
             )
@@ -464,6 +533,7 @@ class GitHubReviewProcessor:
                 config_blob=config_blob,
                 config=config,
                 ci_checks=ci_checks,
+                sync_key=sync_key,
             )
         except RepositoryConfigurationError as exc:
             self._conclude(
@@ -553,6 +623,8 @@ class GitHubReviewProcessor:
 
     def mark_terminal_failure(self, job: WebhookJob, error: str) -> None:
         """Publish that the review failed. Raises if it is worth trying again later."""
+        if job.event_name == "push":
+            return
         try:
             identity = job.payload["repository"]
             full_name = str(identity["full_name"])
@@ -636,18 +708,23 @@ class GitHubReviewProcessor:
         config_blob: dict[str, Any],
         config: RepositoryConfig,
         ci_checks: dict[str, str],
+        sync_key: str,
     ) -> tuple[ReviewRequest, str]:
         full_name = str(repository["full_name"])
         default_branch = str(repository["default_branch"])
 
-        sources = self._load_knowledge_sources(
-            full_name=full_name,
-            default_branch=default_branch,
-            token=token,
-            config=config,
-        )
         repository_origin = _repository_origin(repository)
         repository_key = f"github:{repository_origin}:{repository['id']}"
+        sources = (
+            None
+            if self._knowledge_cache_matches(repository_key, sync_key)
+            else self._load_knowledge_sources(
+                full_name=full_name,
+                default_branch=default_branch,
+                token=token,
+                config=config,
+            )
+        )
         task_references, task_sources = self._load_task_context(
             full_name=full_name,
             repository_id=int(repository["id"]),
@@ -661,48 +738,16 @@ class GitHubReviewProcessor:
         language, framework, standard_packs = _select_stack(config, changed_files)
         head_sha = str(pull_request["head"]["sha"])
 
-        # Embedding calls can be slow, so they must not hold a transaction open.
-        synced_sources = [
-            *[(source, "repo", None) for source in sources],
-            *[(source, "task", task_key) for task_key, source in task_sources],
-        ]
-        with self.pool.connection() as connection:
-            stale = RepositoryKnowledgeSynchronizer(
-                connection, self.embedding_provider
-            ).stale_chunks(repository_key, synced_sources)
-        vectors = {}
-        for document_id, chunks in stale.items():
-            self._check_stopping()
-            vectors[document_id] = self.embedding_provider.embed(chunks)
-
-        self._check_stopping()
-        self.queue.verify_lock(job)
-        with self.pool.connection() as connection:
-            installation_db_id = self._upsert_installation(
-                connection,
-                external_id=installation_external_id,
-                namespace=str(
-                    repository.get("owner", {}).get("login")
-                    or full_name.split("/", 1)[0]
-                ),
-            )
-            synchronizer = RepositoryKnowledgeSynchronizer(
-                connection, self.embedding_provider, vectors=vectors
-            )
-            synchronizer.sync(
-                provider="github",
-                provider_base_url=repository_origin,
-                external_id=str(repository["id"]),
-                full_name=full_name,
-                repository_key=repository_key,
-                default_branch=default_branch,
-                config_sha=str(config_blob["sha"]),
-                config=config,
-                sources=sources,
-                installation_id=installation_db_id,
-            )
-            for task_key, task_source in task_sources:
-                synchronizer.sync_task_sources(repository_key, task_key, [task_source])
+        self._sync_knowledge(
+            job=job,
+            repository=repository,
+            installation_external_id=installation_external_id,
+            config_blob=config_blob,
+            config=config,
+            sources=sources,
+            task_sources=task_sources,
+            sync_key=sync_key,
+        )
         return (
             ReviewRequest(
                 provider=Provider.GITHUB,
@@ -729,6 +774,71 @@ class GitHubReviewProcessor:
             ),
             config.model_profile,
         )
+
+    def _sync_knowledge(
+        self,
+        *,
+        job: WebhookJob,
+        repository: dict[str, Any],
+        installation_external_id: int,
+        config_blob: dict[str, Any],
+        config: RepositoryConfig,
+        sources: list[RepositorySource] | None,
+        task_sources: list[tuple[str, RepositorySource]],
+        sync_key: str,
+    ) -> None:
+        full_name = str(repository["full_name"])
+        repository_origin = _repository_origin(repository)
+        repository_key = f"github:{repository_origin}:{repository['id']}"
+        # None means a cache hit; an empty list still syncs source removals.
+        # Embedding calls can be slow, so they must not hold a transaction open.
+        synced_sources = [
+            *[(source, "repo", None) for source in (sources or [])],
+            *[(source, "task", task_key) for task_key, source in task_sources],
+        ]
+        with self.pool.connection() as connection:
+            stale = RepositoryKnowledgeSynchronizer(
+                connection, self.embedding_provider
+            ).stale_chunks(repository_key, synced_sources)
+        vectors = {}
+        for document_id, chunks in stale.items():
+            self._check_stopping()
+            vectors[document_id] = self.embedding_provider.embed(chunks)
+
+        self._check_stopping()
+        self.queue.verify_lock(job)
+        with self.pool.connection() as connection:
+            synchronizer = RepositoryKnowledgeSynchronizer(
+                connection, self.embedding_provider, vectors=vectors
+            )
+            if sources is not None:
+                installation_db_id = self._upsert_installation(
+                    connection,
+                    external_id=installation_external_id,
+                    namespace=str(
+                        repository.get("owner", {}).get("login")
+                        or full_name.split("/", 1)[0]
+                    ),
+                )
+                synchronizer.sync(
+                    provider="github",
+                    provider_base_url=repository_origin,
+                    external_id=str(repository["id"]),
+                    full_name=full_name,
+                    repository_key=repository_key,
+                    default_branch=str(repository["default_branch"]),
+                    config_sha=str(config_blob["sha"]),
+                    config=config,
+                    sources=sources,
+                    installation_id=installation_db_id,
+                    knowledge_sync_key=sync_key,
+                )
+            else:
+                synchronizer.sync_policy(
+                    repository_key, str(config_blob["sha"]), config
+                )
+            for task_key, task_source in task_sources:
+                synchronizer.sync_task_sources(repository_key, task_key, [task_source])
 
     def _load_config_blob(
         self, full_name: str, branch: str, token: str

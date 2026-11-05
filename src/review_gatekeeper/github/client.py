@@ -157,6 +157,14 @@ class GitHubClient:
             token=token,
         )
 
+    def get_branch_tree_sha(self, full_name: str, branch: str, token: str) -> str:
+        response = self._request(
+            "GET",
+            f"/repos/{_repository_path(full_name)}/branches/{urlparse.quote(branch, safe='')}",
+            token=token,
+        )
+        return str(response["commit"]["commit"]["tree"]["sha"])
+
     def get_tree(self, full_name: str, ref: str, token: str) -> dict[str, Any]:
         return self._request(
             "GET",

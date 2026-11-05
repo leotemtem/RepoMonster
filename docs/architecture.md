@@ -150,6 +150,18 @@ Knowledge is layered:
 
 Repository source versions use provider blob SHA. A changed blob creates a new document version and disables its predecessor. Unchanged content with the same embedding model and dimensions reuses existing chunks. A partial unique index permits only one enabled version of each repository or task logical document; public pack versions remain independently selectable.
 
+Repository knowledge synchronization is cached by default-branch tree SHA,
+embedding model ID, embedding dimensions, and the per-source chunk limit. The
+worker reads the branch tree SHA before policy and knowledge. Matching keys skip
+the recursive tree walk, knowledge blobs, and repository sync; policy is still
+read on every review and linked issues still sync independently. A miss writes
+the key in the same transaction as the knowledge, so a failed sync cannot mark
+the cache current. A branch move during preparation can leave an older key and
+cause another sync on the next delivery. Default-branch push events also refresh
+this cache, without creating or updating Check Runs. Missing or invalid policy on
+a push is ignored; the next PR review reports configuration errors. Disabled
+repositories and installations remain ignored.
+
 ## Retrieval
 
 For each review, RepoMonster:

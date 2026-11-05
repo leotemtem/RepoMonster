@@ -119,6 +119,7 @@ class FakeGitHub:
             ".repomonster/standards/style.md": "# Style\n\nKeep handlers small.\n",
         }
         self.head_files: dict[str, str] = {}
+        self.tree_sha = "b" * 40
         self.pulls: dict[int, dict[str, Any]] = {}
         self.pull_files: dict[int, list[dict[str, Any]]] = {}
         self.issues: dict[int, dict[str, Any]] = {
@@ -381,6 +382,8 @@ class FakeGitHub:
                 return 404, {"message": "Not Found"}
         if method != "GET":
             return 404, {"message": "Not Found"}
+        if route == "/branches/main":
+            return 200, {"commit": {"commit": {"tree": {"sha": self.tree_sha}}}}
         if route == "/pulls":
             page = int(query.get("page", ["1"])[0])
             return 200, list(self.pulls.values()) if page == 1 else []

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cache repository knowledge by default-branch tree and embedding settings, with
+  default-branch push refreshes. Review policy and linked issues remain current
+  on cache hits. Adds migration `006_knowledge_cache.sql`; GitHub Apps should
+  subscribe to the Push event.
+
 - Operator-controlled retention maintenance with `repomonster prune`, configurable
   through `--days` or `RETENTION_DAYS` (default 90).
 
