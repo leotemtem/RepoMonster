@@ -25,7 +25,7 @@ Order of work, each phase shipping on its own:
 | Infrastructure as code | Terraform | Decided |
 | Model access | Claude through the Anthropic API with an API key (stored in Secrets Manager) | Decided |
 | Embeddings | Voyage AI `voyage-4` at 1024 dimensions (Anthropic has no embedding model) | Decided |
-| Hosting model | Single-tenant on the owner's AWS account, built so it can go multi-tenant later | Default, unconfirmed |
+| Hosting model | Single-tenant on the owner's AWS account in eu-west-2, built so it can go multi-tenant later | Decided |
 | Code delivery | Branches and PRs on `leotemtem/repomonster` | Decided |
 
 ## Audit findings
