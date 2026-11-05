@@ -466,7 +466,8 @@ class GitHubReviewProcessor:
             return True
         if normalized.head_sha and head_sha != normalized.head_sha:
             if check_run_id is not None:
-                self.client.update_check_run(
+                self._conclude(
+                    job,
                     full_name,
                     check_run_id,
                     token,
@@ -477,7 +478,8 @@ class GitHubReviewProcessor:
             return False
         if pull_request.get("state") != "open":
             if check_run_id is not None:
-                self.client.update_check_run(
+                self._conclude(
+                    job,
                     full_name,
                     check_run_id,
                     token,
@@ -495,11 +497,12 @@ class GitHubReviewProcessor:
                     full_name, pull_request, job.delivery_id, token
                 )
             )
-            self.queue.set_external_result_id(job.id, str(check_run_id))
+            self.queue.set_external_result_id(job, str(check_run_id))
             job.external_result_id = str(check_run_id)
 
         if pull_request.get("draft"):
-            self.client.update_check_run(
+            self._conclude(
+                job,
                 full_name,
                 check_run_id,
                 token,
@@ -510,6 +513,7 @@ class GitHubReviewProcessor:
             return True
 
         return self._review_pull_request(
+            job=job,
             repository=repository,
             pull_request=pull_request,
             token=token,
@@ -552,6 +556,7 @@ class GitHubReviewProcessor:
                 )
             )
             self._review_pull_request(
+                job=job,
                 repository=repository,
                 pull_request=pull_request,
                 token=token,
@@ -577,7 +582,8 @@ class GitHubReviewProcessor:
             or str(pull_request["head"]["sha"]) != head_sha
             or pull_request.get("draft")
         ):
-            self.client.update_check_run(
+            self._conclude(
+                job,
                 full_name,
                 int(open_run["id"]),
                 token,
@@ -587,6 +593,7 @@ class GitHubReviewProcessor:
             )
             return False
         return self._review_pull_request(
+            job=job,
             repository=repository,
             pull_request=pull_request,
             token=token,
@@ -696,9 +703,22 @@ class GitHubReviewProcessor:
             reviewed.get(name) == current.get(name) for name in config.required_ci
         )
 
+    def _conclude(
+        self,
+        job: WebhookJob,
+        full_name: str,
+        check_run_id: int,
+        token: str,
+        **fields: Any,
+    ) -> None:
+        """Publish a result, unless another worker has taken over this job."""
+        self.queue.verify_lock(job)
+        self.client.update_check_run(full_name, check_run_id, token, **fields)
+
     def _review_pull_request(
         self,
         *,
+        job: WebhookJob,
         repository: dict[str, Any],
         pull_request: dict[str, Any],
         token: str,
@@ -727,6 +747,7 @@ class GitHubReviewProcessor:
                 )
                 return True
             review_request, profile_id = self._prepare_review(
+                job=job,
                 repository=repository,
                 pull_request=pull_request,
                 token=token,
@@ -736,7 +757,8 @@ class GitHubReviewProcessor:
                 ci_checks=ci_checks,
             )
         except RepositoryConfigurationError as exc:
-            self.client.update_check_run(
+            self._conclude(
+                job,
                 full_name,
                 check_run_id,
                 token,
@@ -766,8 +788,10 @@ class GitHubReviewProcessor:
             )
         else:
             result = self.review_service.review(review_request, profile_id=profile_id)
+        self.queue.verify_lock(job)
         self._persist_result(review_request, result)
-        self.client.update_check_run(
+        self._conclude(
+            job,
             full_name,
             check_run_id,
             token,
@@ -838,7 +862,8 @@ class GitHubReviewProcessor:
                 )["id"]
             if not check_run_id:
                 return
-            self.client.update_check_run(
+            self._conclude(
+                job,
                 full_name,
                 int(check_run_id),
                 token,
@@ -888,6 +913,7 @@ class GitHubReviewProcessor:
     def _prepare_review(
         self,
         *,
+        job: WebhookJob,
         repository: dict[str, Any],
         pull_request: dict[str, Any],
         token: str,
@@ -920,6 +946,21 @@ class GitHubReviewProcessor:
         language, framework, standard_packs = _select_stack(config, changed_files)
         head_sha = str(pull_request["head"]["sha"])
 
+        # Embedding calls can be slow, so they must not hold a transaction open.
+        synced_sources = [
+            *[(source, "repo", None) for source in sources],
+            *[(source, "task", task_key) for task_key, source in task_sources],
+        ]
+        with self._connect() as connection:
+            stale = RepositoryKnowledgeSynchronizer(
+                connection, self.embedding_provider
+            ).stale_chunks(repository_key, synced_sources)
+        vectors = {
+            document_id: self.embedding_provider.embed(chunks)
+            for document_id, chunks in stale.items()
+        }
+
+        self.queue.verify_lock(job)
         with self._connect() as connection:
             installation_db_id = self._upsert_installation(
                 connection,
@@ -930,7 +971,7 @@ class GitHubReviewProcessor:
                 ),
             )
             synchronizer = RepositoryKnowledgeSynchronizer(
-                connection, self.embedding_provider
+                connection, self.embedding_provider, vectors=vectors
             )
             synchronizer.sync(
                 provider="github",

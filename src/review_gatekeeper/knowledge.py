@@ -23,9 +23,16 @@ class RepositorySource:
 class RepositoryKnowledgeSynchronizer:
     """Persists trusted base-branch configuration and repository RAG sources."""
 
-    def __init__(self, connection, embedding_provider: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        connection,
+        embedding_provider: EmbeddingProvider,
+        vectors: dict[str, list[list[float]]] | None = None,
+    ) -> None:
         self.connection = connection
         self.embedding_provider = embedding_provider
+        # Embeddings computed before the transaction began, by document.
+        self.vectors = vectors or {}
 
     def sync(
         self,
@@ -166,6 +173,48 @@ class RepositoryKnowledgeSynchronizer:
                     (repository_id, pack_id, version, priority),
                 )
 
+    def stale_chunks(
+        self,
+        repository_key: str,
+        sources: list[tuple[RepositorySource, str, str | None]],
+    ) -> dict[str, list[str]]:
+        """List the chunk text to embed, by document, for each (source, scope, task)."""
+        stale: dict[str, list[str]] = {}
+        for source, scope, task_key in sources:
+            checksum, _, document_id, chunks = _source_identity(
+                repository_key, source, scope, task_key
+            )
+            with self.connection.cursor() as cursor:
+                if not self._document_is_current(cursor, document_id, checksum, chunks):
+                    stale[document_id] = [content for _, content in chunks]
+        return stale
+
+    def _document_is_current(
+        self,
+        cursor,
+        document_id: str,
+        checksum: str,
+        chunks: list[tuple[str | None, str]],
+    ) -> bool:
+        cursor.execute(
+            """
+            SELECT count(*)
+            FROM standard_documents AS document
+            JOIN standard_chunks AS chunk ON chunk.document_id = document.id
+            WHERE document.id = %s
+              AND document.content_checksum = %s
+              AND chunk.embedding_model = %s
+              AND chunk.embedding_dimensions = %s
+            """,
+            (
+                document_id,
+                checksum,
+                self.embedding_provider.model_id,
+                self.embedding_provider.dimensions,
+            ),
+        )
+        return int(cursor.fetchone()[0]) == len(chunks)
+
     def _sync_source(
         self,
         repository_id: int,
@@ -177,30 +226,11 @@ class RepositoryKnowledgeSynchronizer:
     ) -> None:
         if scope not in {"repo", "task"}:
             raise ValueError(f"Unsupported repository knowledge scope: {scope}")
-        checksum = hashlib.sha256(source.content.encode()).hexdigest()
-        namespace = f"task:{task_key}" if scope == "task" else "repo"
-        logical_key = f"{namespace}:{repository_key}:{source.path}"
-        document_id = f"{logical_key}@{source.source_sha}"
-        chunks = chunk_markdown(source.content)
+        checksum, logical_key, document_id, chunks = _source_identity(
+            repository_key, source, scope, task_key
+        )
         with self.connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT count(*)
-                FROM standard_documents AS document
-                JOIN standard_chunks AS chunk ON chunk.document_id = document.id
-                WHERE document.id = %s
-                  AND document.content_checksum = %s
-                  AND chunk.embedding_model = %s
-                  AND chunk.embedding_dimensions = %s
-                """,
-                (
-                    document_id,
-                    checksum,
-                    self.embedding_provider.model_id,
-                    self.embedding_provider.dimensions,
-                ),
-            )
-            if int(cursor.fetchone()[0]) == len(chunks):
+            if self._document_is_current(cursor, document_id, checksum, chunks):
                 cursor.execute(
                     "UPDATE standard_documents SET enabled = true, updated_at = now() WHERE id = %s",
                     (document_id,),
@@ -215,7 +245,11 @@ class RepositoryKnowledgeSynchronizer:
                         (document_id, repository_id, source.path),
                     )
                 return
-        vectors = self.embedding_provider.embed([content for _, content in chunks])
+        vectors = (
+            self.vectors[document_id]
+            if document_id in self.vectors
+            else self.embedding_provider.embed([content for _, content in chunks])
+        )
         stack_key = f"{source.language or 'any'}/{source.framework or 'any'}"
 
         with self.connection.cursor() as cursor:
@@ -308,3 +342,16 @@ class RepositoryKnowledgeSynchronizer:
                         document_id,
                     ),
                 )
+
+
+def _source_identity(
+    repository_key: str,
+    source: RepositorySource,
+    scope: str,
+    task_key: str | None,
+) -> tuple[str, str, str, list[tuple[str | None, str]]]:
+    checksum = hashlib.sha256(source.content.encode()).hexdigest()
+    namespace = f"task:{task_key}" if scope == "task" else "repo"
+    logical_key = f"{namespace}:{repository_key}:{source.path}"
+    document_id = f"{logical_key}@{source.source_sha}"
+    return checksum, logical_key, document_id, chunk_markdown(source.content)

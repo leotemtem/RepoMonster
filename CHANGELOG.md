@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Several workers can now run safely. A worker that lost its job lock can no longer
+  overwrite newer results, jobs for one repository run one at a time, and embedding
+  calls no longer hold database transactions open. Stop workers before applying
+  migration 004.
 - Tightened required CI evidence handling and pagination, repository configuration
   validation, profile selection, issue-reference parsing, and changed-file
   classification. Permanent repository configuration problems now receive an

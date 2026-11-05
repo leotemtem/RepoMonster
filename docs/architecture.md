@@ -62,7 +62,7 @@ The worker:
 9. persists the run and findings
 10. completes the Check Run
 
-Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. A job that uses up its attempts, including one that keeps killing its worker, is not run again. It stays claimable until an `action_required` Check Run is published, because GitHub treats `neutral` as passing for required checks. Workers survive database outages and retry their queue operations. A retry that finds its Check Run already completed does not review again.
+Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. A job that uses up its attempts, including one that keeps killing its worker, is not run again. It stays claimable until an `action_required` Check Run is published, because GitHub treats `neutral` as passing for required checks. Workers survive database outages and retry their queue operations. Each claim takes a lock token that every later queue write must present, and a heartbeat keeps the lock fresh while the worker is alive, so a worker that lost its lock cannot overwrite newer results. A database constraint allows one running job per repository, which keeps reviews and policy syncs in order. Embedding calls run outside database transactions. A retry that finds its Check Run already completed does not review again.
 
 ### Bootstrap
 

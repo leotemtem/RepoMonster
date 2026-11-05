@@ -620,6 +620,7 @@ class EndToEndTestCase(unittest.TestCase):
 
     settings: dict[str, str] = {}
     use_model = False
+    start_default_worker = True
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -663,7 +664,8 @@ class EndToEndTestCase(unittest.TestCase):
             ],
         )
         self.wait_for(self._api_is_up, description="API to start")
-        self.start_worker()
+        if self.start_default_worker:
+            self.start_worker()
 
     def start_worker(self, name: str = "worker") -> None:
         self.start_process(
