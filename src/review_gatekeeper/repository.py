@@ -4,7 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from urllib import request as urlrequest
 
 from .models import ReviewProfile, ReviewRequest, StandardDocument, StandardRule
@@ -155,51 +155,57 @@ class PostgresStandardsRepository:
         task_keys = [item.value for item in request.task_references]
         repository_key = request.resolved_repository_key()
 
+        # MATERIALIZED makes the namespace filters run before ranking. An HNSW index scan
+        # filters afterwards, so another repository's chunks could crowd out every match.
         sql = """
+            WITH candidates AS MATERIALIZED (
+                SELECT
+                    d.id, d.scope, d.language, d.framework, d.title, d.tags,
+                    d.source_urls, c.content, c.embedding
+                FROM standard_chunks AS c
+                JOIN standard_documents AS d ON d.id = c.document_id
+                WHERE d.enabled = true
+                  AND d.scope = %s
+                  AND (
+                        (d.scope = 'public' AND EXISTS (
+                            SELECT 1
+                            FROM repositories AS repository
+                            JOIN repository_pack_selections AS selection
+                              ON selection.repository_id = repository.id
+                            WHERE repository.repository_key = %s
+                              AND selection.enabled = true
+                              AND selection.pack_id = d.pack_id
+                              AND selection.pack_version = d.pack_version
+                        ))
+                     OR (d.scope = 'company' AND d.tenant_key = %s)
+                     OR (d.scope = 'repo' AND d.repository_key = %s)
+                     OR (d.scope = 'task' AND d.repository_key = %s AND d.task_key = ANY(%s::text[]))
+                  )
+                  AND (
+                        d.language IS NULL
+                        OR (%s::text IS NOT NULL AND lower(d.language) = %s::text)
+                  )
+                  AND (
+                        d.framework IS NULL
+                        OR (%s::text IS NOT NULL AND lower(d.framework) = %s::text)
+                  )
+                  AND c.embedding IS NOT NULL
+            )
             SELECT
-                d.id, d.scope, d.language, d.framework, d.title, d.tags,
-                d.source_urls, c.content,
-                1 - (c.embedding <=> %s::vector) AS similarity
-            FROM standard_chunks AS c
-            JOIN standard_documents AS d ON d.id = c.document_id
-            WHERE d.enabled = true
-              AND d.scope = %s
-              AND (
-                    (d.scope = 'public' AND EXISTS (
-                        SELECT 1
-                        FROM repositories AS repository
-                        JOIN repository_pack_selections AS selection
-                          ON selection.repository_id = repository.id
-                        WHERE repository.repository_key = %s
-                          AND selection.enabled = true
-                          AND selection.pack_id = d.pack_id
-                          AND selection.pack_version = d.pack_version
-                    ))
-                 OR (d.scope = 'company' AND d.tenant_key = %s)
-                 OR (d.scope = 'repo' AND d.repository_key = %s)
-                 OR (d.scope = 'task' AND d.repository_key = %s AND d.task_key = ANY(%s::text[]))
-              )
-              AND (
-                    d.language IS NULL
-                    OR (%s::text IS NOT NULL AND lower(d.language) = %s::text)
-              )
-              AND (
-                    d.framework IS NULL
-                    OR (%s::text IS NOT NULL AND lower(d.framework) = %s::text)
-              )
-              AND c.embedding IS NOT NULL
-            ORDER BY c.embedding <=> %s::vector
+                id, scope, language, framework, title, tags, source_urls, content,
+                1 - (embedding <=> %s::vector) AS similarity
+            FROM candidates
+            ORDER BY embedding <=> %s::vector
             LIMIT %s
         """
         with self._connect() as connection, connection.cursor() as cursor:
-            rows = []
-            # Query each scope separately so pgvector can use distance ordering while
-            # preserving task > repo > company > public precedence.
+            rows_by_scope = []
+            # Query each scope separately to preserve task > repo > company > public
+            # precedence.
             for scope in profile.retrieval_order:
                 cursor.execute(
                     sql,
                     (
-                        vector_literal,
                         scope,
                         repository_key,
                         self.tenant_key,
@@ -211,11 +217,12 @@ class PostgresStandardsRepository:
                         framework,
                         framework,
                         vector_literal,
+                        vector_literal,
                         limit,
                     ),
                 )
-                rows.extend(cursor.fetchall())
-            rows = rows[:limit]
+                rows_by_scope.append(cursor.fetchall())
+            rows = _balance_scopes(rows_by_scope, limit)
             document_ids = list(dict.fromkeys(row[0] for row in rows))
             rules = self._load_rules(cursor, document_ids)
 
@@ -342,6 +349,20 @@ class BundledPackRepository:
             ranked.append((profile.retrieval_order.index(document.scope), document))
         ranked.sort(key=lambda item: (item[0], item[1].id))
         return [document for _, document in ranked[:limit]]
+
+
+def _balance_scopes(rows_by_scope: list[list[Any]], limit: int) -> list[Any]:
+    """Give every scope a fair share, so one scope cannot push out the others."""
+    if not rows_by_scope:
+        return []
+    share = max(1, limit // len(rows_by_scope))
+    chosen = [rows[:share] for rows in rows_by_scope]
+    spare = limit - sum(len(rows) for rows in chosen)
+    for index, rows in enumerate(rows_by_scope):
+        extra = rows[share : share + max(spare, 0)]
+        chosen[index].extend(extra)
+        spare -= len(extra)
+    return [row for rows in chosen for row in rows][:limit]
 
 
 def _profile_path(profiles_root: Path, profile_id: str) -> Path:

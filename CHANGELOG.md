@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retrieval now filters before ranking and gives each knowledge scope a fair share.
+  The model brief separates untrusted text from guidance and states when it has not
+  seen a full diff.
 - Removed the unauthenticated `/webhooks/gitlab` route until GitLab support ships.
   GitLab event normalization code remains available; HTTP requests return 404.
 - Several workers can now run safely. A worker that lost its job lock can no longer
