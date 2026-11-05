@@ -107,7 +107,8 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.requests: list[tuple[str, str]] = []
-        self.failures: list[tuple[str, re.Pattern[str], int]] = []
+        self.failures: list[tuple[str, re.Pattern[str], int, str | None]] = []
+        self.hooks: list[tuple[str, re.Pattern[str], Callable[[], None]]] = []
         self.token_requests: list[dict[str, Any]] = []
         self.default_files: dict[str, str] = {
             ".repomonster.yml": repository_config([DEFAULT_REQUIRED_CI]),
@@ -209,9 +210,24 @@ class FakeGitHub:
                 }
             )
 
-    def fail_next(self, method: str, path_pattern: str, status: int = 500) -> None:
+    def fail_next(
+        self,
+        method: str,
+        path_pattern: str,
+        status: int = 500,
+        retry_after: str | None = None,
+    ) -> None:
         with self.lock:
-            self.failures.append((method, re.compile(path_pattern), status))
+            self.failures.append(
+                (method, re.compile(path_pattern), status, retry_after)
+            )
+
+    def after_next(
+        self, method: str, path_pattern: str, callback: Callable[[], None]
+    ) -> None:
+        """Run a callback once the request is handled, before its response is sent."""
+        with self.lock:
+            self.hooks.append((method, re.compile(path_pattern), callback))
 
     def requests_matching(self, method: str, path_pattern: str) -> list[str]:
         with self.lock:
@@ -227,6 +243,7 @@ class FakeGitHub:
         payload = json.loads(raw) if raw else None
         parsed = urlparse.urlsplit(handler.path)
         method = handler.command
+        retry_after = None
         try:
             if method == "POST" and parsed.path == "/embeddings":
                 status, body = 200, self._embeddings(payload)
@@ -249,6 +266,7 @@ class FakeGitHub:
                         self.failures.remove(injected)
                 if injected:
                     status, body = injected[2], {"message": "injected failure"}
+                    retry_after = injected[3]
                 else:
                     status, body = self._github(
                         method,
@@ -259,8 +277,23 @@ class FakeGitHub:
                     )
         except Exception as exc:  # A harness bug must surface in the worker log.
             status, body = 599, {"message": f"fake GitHub error: {exc!r}"}
+        with self.lock:
+            hook = next(
+                (
+                    item
+                    for item in self.hooks
+                    if item[0] == method and item[1].search(parsed.path)
+                ),
+                None,
+            )
+            if hook:
+                self.hooks.remove(hook)
+        if hook:
+            hook[2]()
         encoded = json.dumps(body).encode()
         handler.send_response(status)
+        if retry_after:
+            handler.send_header("Retry-After", retry_after)
         handler.send_header("Content-Type", "application/json")
         handler.send_header("Content-Length", str(len(encoded)))
         handler.end_headers()
@@ -314,6 +347,12 @@ class FakeGitHub:
         if match := re.fullmatch(r"/check-runs/(\d+)", route):
             if method == "PATCH":
                 return self._update_check_run(int(match[1]), payload or {})
+            if method == "GET":
+                with self.lock:
+                    for run in self.check_runs:
+                        if run["id"] == int(match[1]):
+                            return 200, dict(run)
+                return 404, {"message": "Not Found"}
         if method != "GET":
             return 404, {"message": "Not Found"}
         if route == "/pulls":
@@ -533,6 +572,16 @@ class _Postgres:
         self._admin(f'CREATE DATABASE "{name}" TEMPLATE "{TEMPLATE_DATABASE}"')
         return name
 
+    def set_connections_allowed(self, name: str, allowed: bool) -> None:
+        self._admin(f'ALTER DATABASE "{name}" ALLOW_CONNECTIONS {allowed}')
+        if not allowed:
+            with psycopg.connect(self.url("postgres"), autocommit=True) as connection:
+                connection.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s",
+                    (name,),
+                )
+
     def drop_database(self, name: str) -> None:
         self._admin(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
@@ -558,6 +607,8 @@ def service_environment(
         "GITHUB_TIMEOUT_SECONDS": "10",
         "WORKER_POLL_SECONDS": "0.05",
         "WEBHOOK_MAX_ATTEMPTS": "3",
+        "WEBHOOK_RETRY_BASE_SECONDS": "0.1",
+        "WEBHOOK_RETRY_MAX_SECONDS": "0.5",
     }
     if key_path is not None:
         environment["GITHUB_PRIVATE_KEY_PATH"] = str(key_path)
@@ -637,6 +688,13 @@ class EndToEndTestCase(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+
+    def kill_worker(self, name: str = "worker") -> None:
+        self.processes[name].kill()
+        self.processes[name].wait()
+
+    def set_database_available(self, available: bool) -> None:
+        POSTGRES.set_connections_allowed(self.database, available)
 
     def logs(self) -> str:
         sections = []

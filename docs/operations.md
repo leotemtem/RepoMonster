@@ -96,7 +96,9 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `GITHUB_MAX_KNOWLEDGE_FILES` | `100` | maximum default-branch knowledge files |
 | `GITHUB_MAX_KNOWLEDGE_FILE_BYTES` | `500000` | maximum bytes per knowledge file |
 | `MAX_WEBHOOK_BYTES` | `2000000` | maximum raw webhook body size |
-| `WEBHOOK_MAX_ATTEMPTS` | `5` | attempts before terminal failure |
+| `WEBHOOK_MAX_ATTEMPTS` | `8` | attempts before terminal failure |
+| `WEBHOOK_RETRY_BASE_SECONDS` | `15` | retry backoff base; the default schedule retries for about 45 minutes |
+| `WEBHOOK_RETRY_MAX_SECONDS` | `900` | longest delay between retries, and between attempts to publish a failure |
 | `WEBHOOK_LOCK_TIMEOUT_SECONDS` | `900` | stale processing-job recovery threshold |
 | `CI_WAIT_TIMEOUT_SECONDS` | `1800` | how long a pull request waits for required checks before manual escalation |
 | `WORKER_POLL_SECONDS` | `2` | queue polling interval |
@@ -471,7 +473,8 @@ Interpret the result as follows:
 | pending, `available_at > now()` | retry backoff | inspect `last_error`; fix the dependency before the next attempt |
 | processing, recent `locked_at` | worker owns the job | follow worker logs; allow the configured model timeout |
 | processing older than the lock timeout | worker may have died | verify worker/container state; a healthy worker will reclaim it |
-| failed | attempts exhausted | fix the cause and trigger a new PR event |
+| pending, `attempts` at `WEBHOOK_MAX_ATTEMPTS` | attempts exhausted; publishing the failure | check that the worker can reach GitHub |
+| failed | attempts exhausted and the failure published | fix the cause and trigger a new PR event |
 | ignored | unsupported, draft, closed, or superseded work | no action unless the event should have been eligible |
 
 The worker reclaims stale `processing` rows automatically after

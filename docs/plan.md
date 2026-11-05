@@ -50,7 +50,7 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 From the security and data-integrity audit of 2026-11-05. Finish H1 to H3 before Phase 1: autoscaled workers depend on H3. Work H4 to H6 before Phase 1 as well, keeping H3's transaction change ahead of item 0.6.
 
 - [x] **H1 Gate integrity.** Stricter required-check evidence, permanent errors classified without retries, deterministic errors preserved when the model fails, repository configuration faults reported to the author, profile selection validated, and file classification tightened.
-- [ ] **H2 Queue recovery.** A longer retry schedule, attempt limits enforced on reclaim, terminal failures published durably, workers that survive database restarts, and no repeated side effects after a crash.
+- [x] **H2 Queue recovery.** A longer retry schedule, attempt limits enforced on reclaim, terminal failures published durably, workers that survive database restarts, and no repeated side effects after a crash.
 - [ ] **H3 Concurrency.** Fenced job ownership, per-pull-request serialization, ordered policy syncs, and no HTTP calls inside database transactions.
 - [ ] **H4 Model input.** Per-scope retrieval quotas, untrusted text clearly separated in the brief, explicit truncation, and filtered vector search that cannot silently return nothing.
 - [ ] **H5 Resource limits.** Bounded request bodies, non-blocking routes, database timeouts, caps on embedding work, delivery coalescing, and safer YAML parsing.
