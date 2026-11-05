@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue templates, and a protected `main`
   branch ruleset.
 
+### Fixed
+
+- GitHub webhooks no longer fail with a 422: FastAPI treated the `request`
+  argument as a required query parameter, so no delivery reached verification.
+
 ### Changed
 
 - Recorded MIT licensing in `pyproject.toml` project metadata.
