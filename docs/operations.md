@@ -1,6 +1,6 @@
 # Operations guide
 
-This guide covers a single-host Docker Compose deployment with PostgreSQL/pgvector, a GitHub App, and operator-controlled OpenAI-compatible embedding and insight endpoints.
+This guide covers a single-host Docker Compose deployment with PostgreSQL/pgvector, a GitHub App, and operator-controlled embedding and insight endpoints, including native Claude insights.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ This guide covers a single-host Docker Compose deployment with PostgreSQL/pgvect
 - a DNS name and TLS reverse proxy for GitHub webhooks
 - a GitHub App installed on repositories to review
 - an OpenAI-compatible embedding endpoint
-- optionally, an OpenAI-compatible chat-completions endpoint for model findings
+- optionally, an OpenAI-compatible chat-completions endpoint or Anthropic credentials for model findings
 - outbound connectivity from the worker to GitHub and model endpoints
 
 The base Compose file binds the API to `127.0.0.1:8000` and attaches it to an external Docker network named `shared`. For a demonstration without a domain or separate reverse proxy, use the [local demo stack](#no-cost-local-demo) below.
@@ -17,17 +17,16 @@ The base Compose file binds the API to `127.0.0.1:8000` and attaches it to an ex
 
 The demo overlay runs PostgreSQL, bootstrap, API, worker, Caddy and a free
 Cloudflare Quick Tunnel on your machine. It needs no Cloudflare account or domain.
-This is a temporary demonstration setup, not a production deployment. Local
-OpenAI-compatible endpoints can keep model access free too; paid endpoints still
-incur their own charges.
+This is a temporary demonstration setup, not a production deployment. Paid model
+endpoints still incur their own charges.
 
 Prerequisites:
 
 - Docker Engine and Docker Compose 2.24.4 or later (the overlay uses `!override`)
 - a GitHub App installed on the demo repository, with the permissions and events
   listed under [GitHub App setup](#github-app-setup)
-- a local or otherwise reachable OpenAI-compatible embedding endpoint, and
-  optionally a chat-completions endpoint
+- a reachable OpenAI-compatible embedding endpoint, such as Voyage, and optionally
+  Claude or a chat-completions endpoint for model findings
 - outbound connectivity for the tunnel, GitHub API and configured model endpoints
 - the App's PEM private key stored outside the checkout and readable by the
   worker's UID/GID `65532:65532`
@@ -36,9 +35,10 @@ Prepare the deployment `.env` using the environment configuration guidance below
 Set `POSTGRES_PASSWORD`, `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`,
 `GITHUB_KEY_FILE` (an absolute host PEM path), `EMBEDDING_BASE_URL`,
 `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS`. Set `EMBEDDING_API_KEY` if the
-endpoint requires it. For model findings, also set `INSIGHT_BASE_URL`,
-`INSIGHT_MODEL` and, if needed, `INSIGHT_API_KEY`. Keep these operator-controlled
-and never commit them. Native Anthropic and Voyage APIs are not supported yet.
+endpoint requires it. For model findings with Claude, also set
+`INSIGHT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`, as described under
+[Insight endpoint](#insight-endpoint). Keep these operator-controlled and never
+commit them.
 
 The overlay sets the worker's `GITHUB_PRIVATE_KEY_PATH` to its read-only mount at
 `/run/secrets/github_app_key`. It does not require the base deployment's `/opt`
@@ -179,17 +179,54 @@ EMBEDDING_API_KEY=local-server-token
 
 Embedding dimensions are unrelated to context length. They become part of the pgvector schema during initial migration. A model returning 1024-dimensional vectors must use `EMBEDDING_DIMENSIONS=1024`.
 
+Voyage can use the existing OpenAI-compatible embedding client with
+`EMBEDDING_BASE_URL=https://api.voyageai.com/v1`, `EMBEDDING_MODEL=voyage-4`,
+`EMBEDDING_DIMENSIONS=1024`, and your own key in `EMBEDDING_API_KEY`. The client
+does not send `input_type`. This configuration has not yet been run against the
+live Voyage API. Changing an existing database's dimensions requires a migration
+and reindex or database recreation.
+
 ### Insight endpoint
 
 | Variable | Required | Purpose |
 |---|---|---|
+| `INSIGHT_PROVIDER` | no | `anthropic` or `openai_compatible`; unset/empty retains base-URL selection |
 | `INSIGHT_BASE_URL` | no | OpenAI-compatible base URL ending before `/chat/completions` |
-| `INSIGHT_MODEL` | when base URL is set | exact chat model identifier |
-| `INSIGHT_API_KEY` | endpoint-dependent | bearer token sent to the endpoint |
-| `INSIGHT_TIMEOUT_SECONDS` | no | model request timeout; defaults to 90 seconds |
-| `INSIGHT_MAX_TOKENS` | no | optional client-side generation ceiling; omitted by default so the endpoint controls generation |
+| `INSIGHT_MODEL` | for OpenAI-compatible | exact model identifier; Claude defaults to `claude-opus-5-5` |
+| `INSIGHT_API_KEY` | endpoint-dependent | bearer token for the OpenAI-compatible endpoint |
+| `INSIGHT_EFFORT` | no | Claude only: `low`, `medium`, `high` (default), `xhigh`, or `max` |
+| `INSIGHT_TIMEOUT_SECONDS` | no | timeout per model request; Claude defaults to 300 seconds, OpenAI-compatible to 90 |
+| `INSIGHT_MAX_TOKENS` | no | positive output ceiling; Claude defaults to 16000, OpenAI-compatible omits it by default |
+| `ANTHROPIC_API_KEY` | for Claude unless auth token set | your own Anthropic API key; resolved by the SDK |
+| `ANTHROPIC_AUTH_TOKEN` | alternative Claude credential | delegated bearer token; SDK uses the API key if both are set |
+| `ANTHROPIC_BASE_URL` | no | operator-controlled Claude endpoint override; defaults to `https://api.anthropic.com` |
 
-Without `INSIGHT_BASE_URL`, RepoMonster runs deterministic checks only. When configured, insight failures result in manual escalation.
+Claude is enabled only with `INSIGHT_PROVIDER=anthropic`; credentials alone never
+enable paid calls. Explicit `openai_compatible` requires `INSIGHT_BASE_URL`.
+When the provider is unset/empty, the existing base-URL selection applies; without
+a base URL, RepoMonster runs deterministic checks only. Invalid provider names,
+missing Claude credentials, and invalid Claude settings fail at startup.
+
+The Docker image includes the official Anthropic SDK. For a local install, use
+`uv sync --frozen --extra db --extra web --extra anthropic`. A minimal Claude
+configuration follows; use your own key, kept outside version control:
+
+```dotenv
+INSIGHT_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your-own-key
+```
+
+Claude uses non-streaming beta Messages with structured JSON output, effort and
+server-side `fallbacks="default"` under `server-side-fallback-2026-07-01`.
+The locked SDK 2.3.0 sends environment API keys using `Authorization: Bearer`,
+rather than the 1.x SDK's `X-Api-Key` header, and posts to `/v1/messages` without
+a beta query parameter. Credential resolution stays with the SDK.
+Thinking uses the model default; no sampling parameters or assistant prefill are
+sent. Only final text after the last fallback boundary is accepted. The SDK
+retries transient errors twice. Exhausted retries, refusals, incomplete answers,
+and malformed findings result in `manual_escalation`, or `blocked` when
+deterministic errors exist. Briefs, response bodies and credentials are not logged
+by this adapter; SDK content tracing and its request debug dump are disabled.
 
 Local models may need a larger timeout:
 
@@ -199,9 +236,9 @@ WEBHOOK_LOCK_TIMEOUT_SECONDS=1200
 ```
 
 Set these values in the deployment `.env` next to `docker-compose.yml`; do not
-commit that file. Leave `INSIGHT_MAX_TOKENS` unset when RepoMonster should impose
-no client-side generation ceiling. The model endpoint and context window can still
-have their own limits. Keep the webhook lock timeout comfortably above the longest
+commit that file. For the OpenAI-compatible provider, leave `INSIGHT_MAX_TOKENS`
+unset when RepoMonster should impose no client-side generation ceiling. The model
+endpoint and context window can still have their own limits. Keep the webhook lock timeout comfortably above the longest
 expected end-to-end review duration.
 
 The embedding and insight endpoints can share a base URL and API key, but they must use appropriate separate model identifiers.

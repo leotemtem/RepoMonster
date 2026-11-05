@@ -230,7 +230,14 @@ Check Run findings escape untrusted Markdown and HTML. Summaries are generated b
 the service. Terminal failures publish stable error codes with a direction to inspect
 worker logs; full diagnostics stay in queue error records and logs. Insight failures
 publish only their exception type. The direct API omits the model brief. Model
-responses must have `finish_reason: stop` before their findings are accepted.
+responses from the OpenAI-compatible provider must have `finish_reason: stop`
+before their findings are accepted. Explicit `INSIGHT_PROVIDER=anthropic` selects
+the official SDK's beta Messages API with structured JSON, effort and server-side
+default fallbacks. Credentials remain operator-controlled; Claude is never enabled
+implicitly. Its SDK retries transient errors twice. A refusal or stop reason other
+than `end_turn` escalates; only text after the last fallback block is parsed, using
+the shared findings schema and parser. SDK failures are sanitized before service
+logging, and SDK content tracing and request debug dumps are disabled.
 
 ## Provider boundary
 

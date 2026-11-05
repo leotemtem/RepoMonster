@@ -12,7 +12,7 @@ This document separates capabilities that work now from storage or extension poi
 | GitLab | event normalization functions | HTTP route, webhook authentication, project auth, MR retrieval, queue worker, result publication |
 | Retrieval | public packs, repository knowledge, linked local GitHub issues, pgvector ranking | public pack marketplace, web crawling, arbitrary remote documentation ingestion |
 | Organization policy | schema and retrieval filtering by `TENANT_KEY` | public ingestion and administration workflow for company documents |
-| Models | OpenAI-compatible embeddings and chat completions, separate endpoints and keys | per-repository credentials, model routing UI, provider-specific SDK features |
+| Models | OpenAI-compatible embeddings and chat completions, native Claude insights, separate endpoints and keys | per-repository credentials, model routing UI, native OpenAI/Voyage SDK adapters |
 | Policy | repository config, deployment profiles, deterministic rules, model findings | repository-authored executable rules or arbitrary scripts |
 | Execution | consume provider CI/check state | run builds, tests, linters, or repository code |
 | Publication | one summary GitHub Check Run | line annotations, SARIF upload, dashboards, notifications |
@@ -160,6 +160,11 @@ Embedding and insight models can use:
 - different servers and keys
 - a local server reachable through a private network such as Tailscale
 - a hosted endpoint controlled by the operator
+
+Native Claude insights require explicit `INSIGHT_PROVIDER=anthropic` and
+operator-owned Anthropic credentials. The SDK uses structured output and default
+server-side fallbacks, retries transient failures twice, and escalates refusals,
+incomplete output and malformed findings. See [operations](operations.md#insight-endpoint).
 
 The worker must be able to reach both endpoints. RepoMonster does not distribute user credentials from repository configuration and does not expose the model endpoint to GitHub.
 

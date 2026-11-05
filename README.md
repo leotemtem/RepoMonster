@@ -33,7 +33,7 @@ Implemented capabilities include:
 - versioned Python, FastAPI, TypeScript, and Node.js public standard packs
 - PostgreSQL metadata filtering followed by pgvector similarity ranking
 - deterministic description, traceability, testing, CI, change-size, and documentation checks
-- structured findings from an OpenAI-compatible insight endpoint
+- structured findings from an OpenAI-compatible insight endpoint or native Claude provider
 - GitHub Check Run publication against the authoritative PR head SHA
 - authenticated direct review API and an offline local simulation CLI
 - checksummed SQL migrations and idempotent standard-pack bootstrap
