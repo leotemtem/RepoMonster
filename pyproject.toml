@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Self-hosted RAG-backed readiness gate for GitHub pull requests"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "PyYAML>=6.0,<7.0",
 ]
@@ -17,6 +17,12 @@ web = [
   "fastapi>=0.115,<1.0",
   "PyJWT[crypto]>=2.9,<3.0",
   "uvicorn>=0.30,<1.0",
+]
+dev = [
+  "ruff==0.17.3",
+  "mypy==2.4.1",
+  "types-PyYAML==6.0.12.20261103",
+  "bandit[toml]==1.9.4",
 ]
 
 [project.scripts]
@@ -32,3 +38,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]

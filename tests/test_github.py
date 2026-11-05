@@ -6,8 +6,8 @@ from pathlib import Path
 
 from review_gatekeeper.config import load_repository_config
 from review_gatekeeper.github import (
-    GitHubSettings,
     GitHubReviewProcessor,
+    GitHubSettings,
     _decode_github_content,
     _github_issue_numbers,
     _select_stack,

@@ -4,8 +4,11 @@ import unittest
 from pathlib import Path
 
 from review_gatekeeper.models import ReviewProfile, ReviewRequest
-from review_gatekeeper.repository import PostgresStandardsRepository, _vector_literal
-from review_gatekeeper.repository import OpenAICompatibleEmbeddingProvider
+from review_gatekeeper.repository import (
+    OpenAICompatibleEmbeddingProvider,
+    PostgresStandardsRepository,
+    _vector_literal,
+)
 
 
 class _EmbeddingProvider:

@@ -21,7 +21,7 @@ architecture before proposing changes.
 
 Requirements:
 
-- Python 3.11 or newer
+- Python 3.12 or newer
 - Docker and Docker Compose (only for the full service workflow)
 
 Install the package with its optional database and web extras:

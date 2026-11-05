@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .insights import InsightProvider
 from .models import (
     AutoBlockMode,
     AutoBlockPolicy,
@@ -14,8 +15,6 @@ from .models import (
 )
 from .repository import StandardsRepository
 from .rules import RuleEngine
-from .insights import InsightProvider
-
 
 PR_DOCUMENTATION_RULE_IDS = {
     "pr-required-description-sections",
