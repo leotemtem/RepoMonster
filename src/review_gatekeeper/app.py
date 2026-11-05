@@ -10,7 +10,6 @@ from .github import should_queue_event, verify_webhook_signature
 from .insights import OpenAICompatibleInsightProvider
 from .jobs import WebhookQueue
 from .models import ReviewRequest
-from .providers import normalize_gitlab_event
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
 from .service import ReviewService
 
@@ -149,19 +148,6 @@ def create_app() -> Any:
             "queued": queued,
             "duplicate": not queued,
             "delivery_id": x_github_delivery,
-        }
-
-    @app.post("/webhooks/gitlab")
-    async def gitlab_webhook(
-        request: Request,
-        x_gitlab_event: str = Header(default=""),
-    ) -> dict[str, Any]:
-        payload = await request.json()
-        normalized = normalize_gitlab_event(x_gitlab_event, payload)
-        return {
-            "received": True,
-            "normalized_event": normalized.to_dict(),
-            "note": "Fetch changed files and linked task context before submitting to /review.",
         }
 
     return app

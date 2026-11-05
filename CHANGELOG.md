@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removed the unauthenticated `/webhooks/gitlab` route until GitLab support ships.
+  GitLab event normalization code remains available; HTTP requests return 404.
 - Several workers can now run safely. A worker that lost its job lock can no longer
   overwrite newer results, jobs for one repository run one at a time, and embedding
   calls no longer hold database transactions open. Stop workers before applying

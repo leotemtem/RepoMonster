@@ -43,7 +43,6 @@ The API exposes:
 - process health and database/pack readiness
 - authenticated direct reviews
 - signed GitHub webhook ingestion
-- a normalization-only GitLab endpoint
 
 The GitHub request path performs bounded body reading, HMAC verification, JSON parsing, event filtering, and an idempotent queue insert. It returns before provider, embedding, or model work starts.
 
@@ -201,7 +200,7 @@ Local issue references accept at most ten digits. CI collection paginates Check 
 
 While a required check is pending or has not appeared, the Check Run stays `in_progress`, no gate decision is published, and no model call is made. Completed `check_run` and `status` events for a required check re-review the open pull requests on that head SHA, continuing the open Check Run. RepoMonster ignores its own Check Run and skips a re-review if the required check results have not changed. A delayed queue job keyed to the Check Run ends the wait in `manual_escalation` after `CI_WAIT_TIMEOUT_SECONDS`.
 
-GitLab event normalization exists for the provider-independent shape, but the HTTP GitLab route does not yet verify secrets, enqueue jobs, fetch merge requests, or publish results. It must not be described as a complete production provider.
+GitLab event normalization code exists for the provider-independent shape, but there is no GitLab HTTP route. GitLab authentication, queue processing, authoritative merge-request retrieval, and result publication are not implemented. It must not be described as a complete production provider.
 
 ## Execution boundary
 

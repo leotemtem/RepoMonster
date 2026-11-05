@@ -9,7 +9,7 @@ This document separates capabilities that work now from storage or extension poi
 | Area | Available now | Not currently implemented |
 |---|---|---|
 | GitHub | signed App webhooks, installation tokens, PR/files/issues/checks/status retrieval, Check Runs | inline annotations, review comments, labels, approvals, merges, push analysis |
-| GitLab | event normalization functions and a normalization-only HTTP route | webhook authentication, project auth, MR retrieval, queue worker, result publication |
+| GitLab | event normalization functions | HTTP route, webhook authentication, project auth, MR retrieval, queue worker, result publication |
 | Retrieval | public packs, repository knowledge, linked local GitHub issues, pgvector ranking | public pack marketplace, web crawling, arbitrary remote documentation ingestion |
 | Organization policy | schema and retrieval filtering by `TENANT_KEY` | public ingestion and administration workflow for company documents |
 | Models | OpenAI-compatible embeddings and chat completions, separate endpoints and keys | per-repository credentials, model routing UI, provider-specific SDK features |

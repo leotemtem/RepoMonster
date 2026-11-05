@@ -38,7 +38,7 @@ Implemented capabilities include:
 - authenticated direct review API and an offline local simulation CLI
 - checksummed SQL migrations and idempotent standard-pack bootstrap
 
-The provider-neutral review core and GitLab event normalization exist, but GitLab authentication, authoritative merge-request retrieval, queue processing, and result publication are not implemented. See [Harness capabilities](docs/harness-capabilities.md) for the exact capability matrix.
+The provider-neutral review core and GitLab event normalization code exist, but there is no GitLab HTTP route. GitLab authentication, authoritative merge-request retrieval, queue processing, and result publication are not implemented. See [Harness capabilities](docs/harness-capabilities.md) for the exact capability matrix.
 
 ## Documentation
 
