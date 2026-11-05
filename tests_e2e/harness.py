@@ -126,6 +126,7 @@ class FakeGitHub:
         self.statuses: dict[str, list[dict[str, Any]]] = {}
         self.check_runs: list[dict[str, Any]] = []
         self.model_calls = 0
+        self.model_briefs: list[str] = []
         self.add_pull_request()
 
         fake = self
@@ -250,6 +251,7 @@ class FakeGitHub:
             elif method == "POST" and parsed.path == "/chat/completions":
                 with self.lock:
                     self.model_calls += 1
+                    self.model_briefs.append(payload["messages"][-1]["content"])
                 status, body = 500, {"message": "model unavailable"}
             else:
                 with self.lock:
@@ -805,6 +807,10 @@ class EndToEndTestCase(unittest.TestCase):
     def query(self, statement: str, *parameters: Any) -> list[tuple[Any, ...]]:
         with psycopg.connect(self.database_url, autocommit=True) as connection:
             return connection.execute(statement, parameters).fetchall()
+
+    def run_sql(self, statement: str) -> None:
+        with psycopg.connect(self.database_url, autocommit=True) as connection:
+            connection.execute(statement)
 
     def delivery_status(self, delivery: str) -> str | None:
         rows = self.query(

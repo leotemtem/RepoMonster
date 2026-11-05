@@ -164,6 +164,10 @@ The provider-independent `ReviewRequest` contains:
 - normalized changed files and bounded patches
 - provider metadata such as head SHA and CI state
 
+Retrieval runs its namespace filters before ranking, using exact distance over the filtered chunks rather than the HNSW index. Each scope gets a fair share of the results, so one scope cannot push out the others.
+
+The model brief wraps author and issue text in blocks marked with a per-request random token. The diff budget is shared across files, and any file the model did not fully see is named in the brief and in an informational finding.
+
 The deterministic `RuleEngine` produces findings first. Retrieved guidance and deterministic findings are then included in the insight brief. Validated model findings are appended to the deterministic findings.
 
 Changed files are classified using directory segments and file-name conventions. Documentation requires a `.md`, `.mdx`, or `.rst` extension. Test directory segments and test file-name conventions identify test changes; other files remain source changes, including code in documentation and utility directories.

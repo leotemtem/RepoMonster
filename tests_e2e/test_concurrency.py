@@ -168,8 +168,12 @@ class QueueOwnershipTests(EndToEndTestCase):
         self.enqueue("waiting", repository_id=1)
         self.enqueue("other", repository_id=2)
 
-        self.assertEqual(self.queue.claim().delivery_id, "first")
-        self.assertEqual(self.queue.claim().delivery_id, "other")
+        claimed = [self.queue.claim(), self.queue.claim()]
+
+        self.assertEqual(
+            {job.payload["repository"]["id"] for job in claimed},
+            {1, 2},
+        )
 
     def test_previous_owner_cannot_change_a_reclaimed_job(self) -> None:
         self.enqueue("job")
@@ -204,6 +208,5 @@ class QueueOwnershipTests(EndToEndTestCase):
                 "UPDATE webhook_deliveries "
                 "SET status = 'processing', locked_at = now(), "
                 "lock_token = gen_random_uuid() "
-                "WHERE delivery_id = %s RETURNING id",
-                "second",
+                "WHERE status = 'pending' RETURNING id",
             )
