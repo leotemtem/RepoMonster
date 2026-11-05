@@ -99,7 +99,7 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `WEBHOOK_MAX_ATTEMPTS` | `8` | attempts before terminal failure |
 | `WEBHOOK_RETRY_BASE_SECONDS` | `15` | retry backoff base; the default schedule retries for about 45 minutes |
 | `WEBHOOK_RETRY_MAX_SECONDS` | `900` | longest delay between retries, and between attempts to publish a failure |
-| `WEBHOOK_LOCK_TIMEOUT_SECONDS` | `900` | stale processing-job recovery threshold |
+| `WEBHOOK_LOCK_TIMEOUT_SECONDS` | `900` | stale processing-job recovery threshold; workers renew the lock every third of this while alive |
 | `CI_WAIT_TIMEOUT_SECONDS` | `1800` | how long a pull request waits for required checks before manual escalation |
 | `WORKER_POLL_SECONDS` | `2` | queue polling interval |
 
@@ -469,7 +469,7 @@ Interpret the result as follows:
 
 | Observation | Meaning | Operator action |
 |---|---|---|
-| pending, `available_at <= now()` | ready for a worker | verify a worker is running and can reach PostgreSQL |
+| pending, `available_at <= now()` | ready for a worker, or waiting for another job on the same repository | verify a worker is running and can reach PostgreSQL |
 | pending, `available_at > now()` | retry backoff | inspect `last_error`; fix the dependency before the next attempt |
 | processing, recent `locked_at` | worker owns the job | follow worker logs; allow the configured model timeout |
 | processing older than the lock timeout | worker may have died | verify worker/container state; a healthy worker will reclaim it |

@@ -15,7 +15,7 @@ from .config import load_repository_config
 from .database import DatabaseMigrator, project_root
 from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
 from .insights import OpenAICompatibleInsightProvider
-from .jobs import WebhookJob, WebhookQueue
+from .jobs import LostJobLock, WebhookJob, WebhookQueue
 from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .packs import PackSynchronizer, discover_packs
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
@@ -124,6 +124,37 @@ def _sync_local_repository(args) -> int:
     return 0
 
 
+class _Heartbeat:
+    """Keep a job's lock fresh while this worker is alive and working on it."""
+
+    def __init__(
+        self, queue: WebhookQueue, job: WebhookJob, logger: logging.Logger
+    ) -> None:
+        self.queue = queue
+        self.job = job
+        self.logger = logger
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self) -> _Heartbeat:
+        self.thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.done.set()
+        self.thread.join()
+
+    def _run(self) -> None:
+        while not self.done.wait(self.queue.heartbeat_seconds):
+            try:
+                if not self.queue.heartbeat(self.job):
+                    return
+            except Exception:
+                self.logger.exception(
+                    "could not renew the lock for delivery %s", self.job.delivery_id
+                )
+
+
 def _retry_on_database_error(
     operation: Callable[[], Any], stop: threading.Event, logger: logging.Logger
 ) -> Any:
@@ -152,11 +183,14 @@ def _publish_terminal_failure(
         processor.mark_terminal_failure(
             job, job.last_error or "The worker stopped before finishing this review."
         )
+    except LostJobLock:
+        logger.warning("delivery %s lost its lock; stopping", job.delivery_id)
+        return
     except Exception:
         logger.exception("could not publish failure for delivery %s", job.delivery_id)
         _retry_on_database_error(partial(queue.defer_publication, job), stop, logger)
         return
-    _retry_on_database_error(partial(queue.mark_failed, job.id), stop, logger)
+    _retry_on_database_error(partial(queue.mark_failed, job), stop, logger)
     logger.error("delivery %s failed permanently", job.delivery_id)
 
 
@@ -211,7 +245,11 @@ def _worker() -> int:
             _publish_terminal_failure(job, queue, processor, stop, logger)
             continue
         try:
-            processed = processor.process(job)
+            with _Heartbeat(queue, job, logger):
+                processed = processor.process(job)
+        except LostJobLock:
+            logger.warning("delivery %s lost its lock; stopping", job.delivery_id)
+            continue
         except Exception as exc:
             logger.exception(
                 "delivery %s failed on attempt %s", job.delivery_id, job.attempts
@@ -219,7 +257,7 @@ def _worker() -> int:
             _retry_on_database_error(partial(queue.fail, job, exc), stop, logger)
             continue
         _retry_on_database_error(
-            partial(queue.complete, job.id, ignored=not processed), stop, logger
+            partial(queue.complete, job, ignored=not processed), stop, logger
         )
         logger.info("delivery %s completed", job.delivery_id)
     logger.info("GitHub review worker stopped")
