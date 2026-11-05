@@ -10,10 +10,10 @@ from pathlib import Path
 
 from .config import load_repository_config
 from .database import DatabaseMigrator, project_root
-from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
 from .insights import OpenAICompatibleInsightProvider
 from .jobs import WebhookQueue
+from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .packs import PackSynchronizer, discover_packs
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
 from .service import ReviewService

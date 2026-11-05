@@ -47,7 +47,7 @@ class OpenAICompatibleEmbeddingProvider:
         self.api_key = api_key
 
     @classmethod
-    def from_environment(cls) -> "OpenAICompatibleEmbeddingProvider":
+    def from_environment(cls) -> OpenAICompatibleEmbeddingProvider:
         return cls(
             base_url=os.environ["EMBEDDING_BASE_URL"],
             model=os.environ["EMBEDDING_MODEL"],

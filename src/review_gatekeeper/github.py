@@ -7,7 +7,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -31,7 +31,6 @@ from .providers import normalize_github_event
 from .repository import EmbeddingProvider
 from .service import ReviewService
 from .url_safety import require_http_url
-
 
 CHECK_NAME = "RepoMonster review gate"
 SUPPORTED_PULL_REQUEST_ACTIONS = {
@@ -73,7 +72,7 @@ class GitHubSettings:
         )
 
     @classmethod
-    def from_environment(cls) -> "GitHubSettings":
+    def from_environment(cls) -> GitHubSettings:
         required = {
             "GITHUB_APP_ID": os.getenv("GITHUB_APP_ID", "").strip(),
             "GITHUB_PRIVATE_KEY_PATH": os.getenv("GITHUB_PRIVATE_KEY_PATH", "").strip(),
@@ -114,7 +113,7 @@ class GitHubClient:
     def installation_token(self, installation_id: int, repository_id: int) -> str:
         cache_key = (installation_id, repository_id)
         cached = self._installation_tokens.get(cache_key)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if cached and cached[1] > now + timedelta(minutes=2):
             return cached[0]
         response = self._request(
@@ -261,7 +260,7 @@ class GitHubClient:
             raise RuntimeError(
                 "PyJWT with cryptography support is required for GitHub Apps"
             ) from exc
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         private_key = self.settings.private_key_path.read_text()
         return jwt.encode(
             {
@@ -986,4 +985,4 @@ def _api_error_detail(body: bytes) -> str:
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")

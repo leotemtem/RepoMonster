@@ -3,13 +3,13 @@ from __future__ import annotations
 import hmac
 import json
 import os
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from .models import ReviewRequest
-from .insights import OpenAICompatibleInsightProvider
 from .database import project_root
 from .github import SUPPORTED_PULL_REQUEST_ACTIONS, verify_webhook_signature
+from .insights import OpenAICompatibleInsightProvider
 from .jobs import WebhookQueue
+from .models import ReviewRequest
 from .providers import normalize_gitlab_event
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
 from .service import ReviewService

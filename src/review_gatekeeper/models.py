@@ -5,42 +5,46 @@ from enum import Enum
 from typing import Any
 
 
-class Provider(str, Enum):
+class Provider(str, Enum):  # noqa: UP042 - preserve legacy Enum string representation.
     GITHUB = "github"
     GITLAB = "gitlab"
 
 
-class ChangeRequestKind(str, Enum):
+class ChangeRequestKind(  # noqa: UP042 - preserve legacy Enum string representation.
+    str, Enum
+):
     PULL_REQUEST = "pull_request"
     MERGE_REQUEST = "merge_request"
     PUSH = "push"
 
 
-class Severity(str, Enum):
+class Severity(str, Enum):  # noqa: UP042 - preserve legacy Enum string representation.
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
 
 
-class FindingImpact(str, Enum):
+class FindingImpact(str, Enum):  # noqa: UP042 - preserve legacy Enum string representation.
     ADVISORY = "advisory"
     SIGNIFICANT = "significant"
     BLOCKING = "blocking"
 
 
-class InsightRecommendation(str, Enum):
+class InsightRecommendation(  # noqa: UP042 - preserve legacy Enum string representation.
+    str, Enum
+):
     READY = "ready"
     REQUEST_CHANGES = "request_changes"
     BLOCK = "block"
 
 
-class AutoBlockMode(str, Enum):
+class AutoBlockMode(str, Enum):  # noqa: UP042 - preserve legacy Enum string representation.
     OFF = "off"
     SHADOW = "shadow"
     ENFORCE = "enforce"
 
 
-class GateState(str, Enum):
+class GateState(str, Enum):  # noqa: UP042 - preserve legacy Enum string representation.
     BLOCKED = "blocked"
     NEEDS_AUTHOR_UPDATES = "needs_author_updates"
     READY_FOR_HUMAN_REVIEW = "ready_for_human_review"
@@ -54,7 +58,7 @@ class AutoBlockPolicy:
     minimum_model_impact: FindingImpact = FindingImpact.SIGNIFICANT
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "AutoBlockPolicy":
+    def from_dict(cls, payload: dict[str, Any] | None) -> AutoBlockPolicy:
         payload = payload or {}
         minimum_model_impact = FindingImpact(
             str(payload.get("minimum_model_impact", FindingImpact.SIGNIFICANT.value))
@@ -87,7 +91,7 @@ class ChangedFile:
     diff_excerpt: str = ""
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ChangedFile":
+    def from_dict(cls, payload: dict[str, Any]) -> ChangedFile:
         return cls(
             path=payload["path"],
             language=payload.get("language"),
@@ -131,7 +135,7 @@ class TaskReference:
     value: str
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "TaskReference":
+    def from_dict(cls, payload: dict[str, Any]) -> TaskReference:
         return cls(kind=payload["kind"], value=payload["value"])
 
 
@@ -154,7 +158,7 @@ class ReviewRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ReviewRequest":
+    def from_dict(cls, payload: dict[str, Any]) -> ReviewRequest:
         return cls(
             provider=Provider(payload["provider"]),
             change_kind=ChangeRequestKind(payload["change_kind"]),
@@ -229,7 +233,7 @@ class StandardRule:
     check_statements: list[str]
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "StandardRule":
+    def from_dict(cls, payload: dict[str, Any]) -> StandardRule:
         return cls(
             id=payload["id"],
             severity=Severity(payload["severity"]),
@@ -253,7 +257,7 @@ class StandardDocument:
     retrieved_chunks: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "StandardDocument":
+    def from_dict(cls, payload: dict[str, Any]) -> StandardDocument:
         return cls(
             id=payload["id"],
             scope=payload["scope"],
@@ -282,7 +286,7 @@ class ReviewProfile:
     auto_block: AutoBlockPolicy = field(default_factory=AutoBlockPolicy)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ReviewProfile":
+    def from_dict(cls, payload: dict[str, Any]) -> ReviewProfile:
         return cls(
             id=payload["id"],
             name=payload["name"],

@@ -14,7 +14,6 @@ from .models import (
 )
 from .url_safety import require_http_url
 
-
 FINDINGS_RESPONSE_FORMAT = {
     "type": "json_schema",
     "json_schema": {
@@ -99,7 +98,7 @@ class OpenAICompatibleInsightProvider:
         self.max_tokens = max_tokens
 
     @classmethod
-    def from_environment(cls) -> "OpenAICompatibleInsightProvider":
+    def from_environment(cls) -> OpenAICompatibleInsightProvider:
         return cls(
             base_url=os.environ["INSIGHT_BASE_URL"],
             model=os.environ["INSIGHT_MODEL"],

@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Recorded MIT licensing in `pyproject.toml` project metadata.
+- Raised the supported Python floor to 3.12 and pinned development tooling used
+  by CI.
 
 ## [0.1.0]
 
