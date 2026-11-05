@@ -65,9 +65,26 @@ class RepositoryConfig:
         return settings
 
 
+MAX_CONFIG_BYTES = 65_536
+
+
+class _PolicyLoader(yaml.SafeLoader):
+    """Safe YAML without aliases, which can expand a small file enormously."""
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.AliasEvent):
+            raise ValueError(".repomonster.yml must not use YAML aliases")
+        return super().compose_node(parent, index)
+
+
 def load_repository_config(content: str) -> RepositoryConfig:
+    if len(content) > MAX_CONFIG_BYTES:
+        raise ValueError(f".repomonster.yml must be under {MAX_CONFIG_BYTES} bytes")
     try:
-        payload = _mapping(yaml.safe_load(content), ".repomonster.yml")
+        payload = _mapping(
+            yaml.load(content, Loader=_PolicyLoader),  # nosec B506
+            ".repomonster.yml",
+        )
     except yaml.YAMLError as exc:
         raise ValueError(".repomonster.yml must contain valid YAML") from exc
     if type(payload.get("version")) is not int or payload["version"] != 1:

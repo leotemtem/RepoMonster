@@ -106,7 +106,8 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `GITHUB_MAX_CHANGED_FILES` | `1000` | maximum changed files accepted for a review |
 | `GITHUB_MAX_KNOWLEDGE_FILES` | `100` | maximum default-branch knowledge files |
 | `GITHUB_MAX_KNOWLEDGE_FILE_BYTES` | `500000` | maximum bytes per knowledge file |
-| `MAX_WEBHOOK_BYTES` | `2000000` | maximum raw webhook body size |
+| `MAX_WEBHOOK_BYTES` | `2000000` | maximum request body size for every route, enforced while the body arrives |
+| `KNOWLEDGE_MAX_CHUNKS_PER_SOURCE` | `200` | sections embedded per file or issue; repository files over this are a configuration error, and longer issues are truncated |
 | `WEBHOOK_MAX_ATTEMPTS` | `8` | attempts before terminal failure |
 | `WEBHOOK_RETRY_BASE_SECONDS` | `15` | retry backoff base; the default schedule retries for about 45 minutes |
 | `WEBHOOK_RETRY_MAX_SECONDS` | `900` | longest delay between retries, and between attempts to publish a failure |

@@ -264,7 +264,7 @@ Start in `shadow` and review false positives before enabling `enforce`. Insight 
 
 Selects an existing deployment-owned JSON profile under `profiles/`. Profile names use only lowercase letters, digits, underscores, and hyphens. The resolved file must remain inside the profiles directory. The repository can select a profile name but cannot define endpoint URLs, API keys, or arbitrary model settings.
 
-Invalid YAML, incorrect configuration field types, unavailable profiles or packs, and invalid knowledge text publish a configuration-specific `action_required` result on the first processing attempt without retrying. The `model`, `knowledge`, and `checks` sections must be mappings; path, pack, and required-CI lists must contain strings. Correct the default-branch configuration and update the PR to request another review.
+`.repomonster.yml` must be under 64 KB and cannot use YAML aliases. Invalid YAML, incorrect configuration field types, unavailable profiles or packs, and invalid knowledge text publish a configuration-specific `action_required` result on the first processing attempt without retrying. The `model`, `knowledge`, and `checks` sections must be mappings; path, pack, and required-CI lists must contain strings. Correct the default-branch configuration and update the PR to request another review.
 
 The shipped `default` profile:
 
