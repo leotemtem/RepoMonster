@@ -26,7 +26,9 @@ class DatabaseMigrator:
         if not paths:
             raise RuntimeError(f"No migrations found in {self.migrations_root}")
 
-        with psycopg.connect(self.database_url) as connection:
+        with psycopg.connect(
+            self.database_url, connect_timeout=database_connect_timeout()
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtext('repomonster:migrations'))"
@@ -63,6 +65,13 @@ class DatabaseMigrator:
                     )
                     applied.append(path.name)
         return applied
+
+
+def database_connect_timeout() -> int:
+    timeout = int(os.getenv("DATABASE_CONNECT_TIMEOUT_SECONDS", "10"))
+    if timeout <= 0:
+        raise ValueError("DATABASE_CONNECT_TIMEOUT_SECONDS must be positive")
+    return timeout
 
 
 def project_root() -> Path:

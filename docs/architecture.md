@@ -82,6 +82,22 @@ PostgreSQL stores:
 
 The database is both system-of-record and work queue for the current single-host design.
 
+Each API and worker process creates one `psycopg_pool.ConnectionPool`, shared by its
+queue, standards repository and, in the worker, GitHub processor. A shared
+`build_review_service()` factory wires the repository and optional insight provider
+for both processes. `/readyz` uses the repository's public ready-pack count method.
+Pools open without waiting for database availability and close at shutdown; every
+checkout checks connection health so terminated connections are replaced.
+
+Pool connections have configurable connect and statement timeouts, and checkout has
+its own timeout. The worker retries checkout timeouts as database outages and requires
+a pool maximum of at least two so its heartbeat can run beside a processing transaction.
+`pool.connection()` commits on success and rolls back on exceptions. Claims still
+commit before processing, every ownership update remains a short transaction, and
+pooled connections are returned before HTTP calls. Migration and management commands
+keep dedicated connections with the connect timeout but without the pool's statement
+timeout, because they perform long single transactions.
+
 ## Trust boundaries
 
 ### Trusted operator configuration
@@ -224,4 +240,4 @@ This separation prevents untrusted repository code from running beside provider 
 
 The queue claim uses row locking and `SKIP LOCKED`, so multiple workers can claim different jobs. Repository knowledge synchronization and review persistence use database uniqueness constraints for idempotency.
 
-The current Compose deployment runs one worker and has not been load-tested as a distributed service. Before horizontal production scaling, add metrics, structured job timing, graceful deployment coordination, model concurrency limits, and database connection management.
+The current Compose deployment runs one worker and has not been load-tested as a distributed service. Each API and worker process has a bounded connection pool; total connection demand grows with the process count. Before horizontal production scaling, add metrics, structured job timing, graceful deployment coordination, and model concurrency limits, and size the pools against the database's connection budget.

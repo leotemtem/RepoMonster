@@ -10,6 +10,7 @@ from harness import (
     INSTALLATION_ID,
     EndToEndTestCase,
 )
+from psycopg_pool import ConnectionPool
 
 from review_gatekeeper.jobs import LostJobLock, WebhookQueue
 
@@ -123,9 +124,16 @@ class QueueOwnershipTests(EndToEndTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.queue = WebhookQueue(
-            self.database_url, max_attempts=3, lock_timeout_seconds=900
+        pool = ConnectionPool(
+            self.database_url,
+            min_size=1,
+            max_size=5,
+            open=False,
+            check=ConnectionPool.check_connection,
         )
+        self.addCleanup(pool.close)
+        pool.open(wait=True)
+        self.queue = WebhookQueue(pool, max_attempts=3, lock_timeout_seconds=900)
 
     def enqueue(self, delivery: str, repository_id: int = 1) -> None:
         self.queue.enqueue(

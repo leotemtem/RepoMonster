@@ -87,13 +87,12 @@ stacks:
     def test_review_persistence_records_model_recommendation_and_impact(self) -> None:
         connection = _PersistenceConnection()
         processor = GitHubReviewProcessor(
-            database_url="unused",
+            pool=_Pool(connection),
             queue=_FakeQueue(),
             client=_FakeGitHubClient(head_sha="head"),
             embedding_provider=object(),
             review_service=object(),
         )
-        processor._connect = lambda: connection
         request = ReviewRequest.from_dict(
             {
                 "provider": "github",
@@ -216,6 +215,14 @@ def _pull_request_job(*, head_sha: str) -> WebhookJob:
             },
         },
     )
+
+
+class _Pool:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def connection(self):
+        return self._connection
 
 
 if __name__ == "__main__":

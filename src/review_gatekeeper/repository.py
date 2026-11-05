@@ -4,11 +4,14 @@ import json
 import math
 import os
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from .http import HTTPClient
 from .models import ReviewProfile, ReviewRequest, StandardDocument, StandardRule
 from .url_safety import require_http_url
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 
 class StandardsRepository(Protocol):
@@ -97,24 +100,24 @@ class PostgresStandardsRepository:
 
     def __init__(
         self,
-        database_url: str,
+        pool: ConnectionPool,
         embedding_provider: EmbeddingProvider,
         profiles_root: Path,
         tenant_key: str | None = None,
     ) -> None:
-        self.database_url = database_url
+        self.pool = pool
         self.embedding_provider = embedding_provider
         self.profiles_root = profiles_root
         self.tenant_key = tenant_key
 
-    def _connect(self):
-        try:
-            import psycopg
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "Install database dependencies with: pip install -e '.[db]'"
-            ) from exc
-        return psycopg.connect(self.database_url)
+    def ready_pack_count(self) -> int:
+        """Check database access and count installed packs that are ready."""
+        with self.pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM standard_pack_versions WHERE status = 'ready'"
+            )
+            row = cast(tuple[int], cursor.fetchone())
+            return int(row[0])
 
     def load_profile(
         self, profile_id: str, request: ReviewRequest | None = None
@@ -122,7 +125,7 @@ class PostgresStandardsRepository:
         # Profiles are operational policy, not retrievable standards content.
         review_settings = {}
         if request is not None:
-            with self._connect() as connection, connection.cursor() as cursor:
+            with self.pool.connection() as connection, connection.cursor() as cursor:
                 cursor.execute(
                     """
                     SELECT review_settings, model_profile
@@ -212,7 +215,7 @@ class PostgresStandardsRepository:
             ORDER BY embedding <=> %s::vector
             LIMIT %s
         """
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             rows_by_scope = []
             # Query each scope separately to preserve task > repo > company > public
             # precedence.
