@@ -65,7 +65,9 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 - [ ] **3.2 Vulnerability and health lookups.** OSV `querybatch` for the whole diff; deps.dev for Scorecard, licences and graph; registry metadata for deprecated, yanked, release age, install scripts and maintainer changes. Cache by package and version.
 - [ ] **3.3 Image checks.** Detect `FROM` changes and tag-only pins; resolve digests; Syft SBOM and Grype scan in the worker.
 - [ ] **3.4 Findings and SARIF.** `supply_chain` findings feed the existing gate; SARIF upload to GitHub code scanning.
-- [ ] **3.5 Agentic audit job.** Scheduled and trigger-based runs of Cloudflare's security-audit-skill inside the Phase 4 sandbox; map `confirmed`, `needs_validation` and `rejected` into findings; token budget per run.
+- [ ] **3.5 Zero Wire and KEV intelligence.** Scheduled poll of the Zero Wire RSS feed and the CISA KEV catalogue into a `threat_briefings` table; join on CVE aliases from OSV results; "Needs attention" raises the finding to an error with the briefing link. Store each default branch's dependency and image inventory and alert installed repositories when a new briefing matches.
+    - Done when: a fixture briefing for a CVE present in a test lockfile produces an error finding with the briefing link, and a new briefing triggers an alert for a repository with no open PR.
+- [ ] **3.6 Agentic audit job.** Scheduled and trigger-based runs of Cloudflare's security-audit-skill inside the Phase 4 sandbox; map `confirmed`, `needs_validation` and `rejected` into findings; token budget per run.
 
 ## Phase 4: verification sandbox and attack-pattern library
 

@@ -15,7 +15,7 @@ Order of work, each phase shipping on its own:
 1. **Phase 0, streamline:** fix the bug and remove the duplication. The AWS port touches the same seams, so doing this first makes the port smaller.
 2. **Phase 1, AWS service:** ECS Fargate, RDS PostgreSQL with pgvector, Secrets Manager, Terraform.
 3. **Phase 2, model providers:** native Anthropic (Claude) and OpenAI adapters, replacing the Tailscale-reached local model.
-4. **Phase 3, security gate:** deterministic dependency and image checks on every PR, plus Cloudflare's security-audit-skill for deeper audits.
+4. **Phase 3, security gate:** deterministic dependency and image checks on every PR, prioritised by Cloudflare's Zero Wire briefings, plus Cloudflare's security-audit-skill for deeper audits.
 5. **Phase 4, verification sandbox and attack-pattern library:** reproduce a finding on the base commit, confirm the fix on the head commit, and record recurring patterns.
 
 ## Decisions
@@ -134,6 +134,16 @@ These read lockfiles, registry metadata and image layers but never run repositor
 
 Results become findings in a new `supply_chain` category, so the existing profile and auto-block policy decide the gate. Upload them as SARIF too, which closes the "SARIF upload" gap listed in `harness-capabilities.md`.
 
+### Threat intelligence: Cloudflare Zero Wire
+
+[Zero Wire](https://blog.cloudflare.com/zero-wire) is Cloudflare's public feed of briefings on significant critical CVEs in internet-facing software. It does not scan anything; it says which disclosures matter now and what to do. RepoMonster uses it as a priority signal on top of OSV, not as a replacement, because it deliberately covers only a small set of CVEs.
+
+- **Ingest:** the worker polls the [Zero Wire RSS feed](https://developers.cloudflare.com/changelog/post/2026-11-03-radar-zero-wire/) on a schedule (no API or JSON feed is documented) and stores each briefing: CVE IDs, status ("Needs attention" or "Reference"), last-checked date and link. Also pull CISA's Known Exploited Vulnerabilities catalogue directly, since Zero Wire cites it.
+- **Match on PRs:** when OSV reports a vulnerability for a new or changed dependency or image package, join its CVE aliases against stored briefings. A "Needs attention" match raises the finding to an error and adds the briefing link and its recommended action to the Check Run.
+- **Match without a PR:** keep the latest dependency and image inventory for each default branch. When a new briefing arrives, check every installed repository and open an alert (an issue or a scheduled Check Run) where an affected version is present, so exposure is found even when nobody opens a PR.
+- **Feed Phase 4:** a Zero Wire match moves the CVE to the front of the sandbox verification queue, and the briefing's chronology and "facts versus unknowns" seed the attack-pattern entry.
+- **Trust boundary:** briefing text is third-party content. It is shown to the model only as evidence, never as instructions, matching how repository text is already handled in `insights.py`.
+
 ### Layer 2: agentic audit with security-audit-skill
 
 The skill runs six phases: reconnaissance, coverage-led hunting, adversarial validation, schema-checked `findings.json`, independent re-verification, and reports. Repeat runs are additive and revalidate changed source.
@@ -188,5 +198,7 @@ Store it in two new tables (`attack_patterns`, `pattern_occurrences`) with an em
 - [RDS PostgreSQL pgvector with HNSW](https://aws.amazon.com/about-aws/whats-new/2023/10/amazon-rds-postgresql-pgvector-hnsw-indexing/)
 - [OSV querybatch](https://google.github.io/osv.dev/post-v1-querybatch)
 - [deps.dev API](https://blog.deps.dev/api/)
+- [Introducing Zero Wire](https://blog.cloudflare.com/zero-wire)
+- [Zero Wire changelog and RSS feed](https://developers.cloudflare.com/changelog/post/2026-11-03-radar-zero-wire/)
 - [Voyage AI text embeddings](https://docs.voyageai.com/docs/embeddings)
 - [Voyage AI pricing](https://docs.voyageai.com/docs/pricing)
