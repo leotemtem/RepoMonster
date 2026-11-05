@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Split the GitHub adapter into client, processor and Check Run formatting modules,
+  preserving existing public imports and behavior.
+
 - Check Runs publish stable processing error codes and display finding text safely;
   full diagnostics stay in operator records. Direct review responses omit model briefs.
 - Review request storage omits diff excerpts and normalizes text for PostgreSQL.

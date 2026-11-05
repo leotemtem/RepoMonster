@@ -46,7 +46,7 @@ uv run --frozen bandit -q -r src
 - [x] **0.4 Close the GitLab route (F5).** Remove `/webhooks/gitlab` until GitLab support ships, keeping `normalize_gitlab_event` and its tests.
 - [x] **0.5 Shared HTTP client (F7).** New `http.py` on httpx with per-call timeouts, retries with backoff on 429/5xx and `Retry-After`. Move the GitHub and embedding clients onto it; make the embedding timeout configurable.
 - [x] **0.6 Connection pool and service factory (F8, F9).** One `psycopg_pool.ConnectionPool` built at startup and injected into the queue, repository and processor. One `build_review_service()` used by both `app.py` and the worker. `/readyz` uses a public repository method.
-- [ ] **0.7 Split `github.py` (F10).** `github/client.py` (API and auth), `github/processor.py` (job handling), `github/publish.py` (Check Run text). No behaviour change; existing tests move with the code.
+- [x] **0.7 Split `github/` (F10).** `github/client.py` (API and auth), `github/processor.py` (job handling), `github/publish.py` (Check Run text). No behaviour change; existing tests move with the code.
 - [ ] **0.8 Knowledge cache (F2).** Skip the tree walk and resync when the default-branch tree SHA matches the last sync. Queue default-branch `push` events to refresh knowledge.
 - [ ] **0.9 Naming (F11).** Rename the package `review_gatekeeper` to `repomonster`, keep one CLI (`repomonster`, with `review-gate` becoming a subcommand), one liveness route (`/healthz`), and the FastAPI title "RepoMonster". Note the rename in `CHANGELOG.md`.
 
