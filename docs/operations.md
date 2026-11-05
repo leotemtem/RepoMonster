@@ -13,6 +13,17 @@ This guide covers a single-host Docker Compose deployment with PostgreSQL/pgvect
 
 The supplied Compose file binds the API to `127.0.0.1:8000` and attaches it to an external Docker network named `shared`. A reverse proxy is not included.
 
+## Reproducible builds and updates
+
+The Dockerfile exports the `db` and `web` dependencies from `uv.lock` using
+uv 0.11.28, then installs them with hash verification. Development tools and uv
+are excluded from the runtime image. Python and PostgreSQL/pgvector images keep
+their readable tags and are pinned by digest, including the end-to-end test image.
+
+Dependabot proposes weekly updates for uv dependencies, Docker and Compose image
+pins, and GitHub Actions. Review lockfile and digest updates together with the
+checks in [CONTRIBUTING.md](../CONTRIBUTING.md), then rebuild the service image.
+
 ## Environment configuration
 
 Start from the template:

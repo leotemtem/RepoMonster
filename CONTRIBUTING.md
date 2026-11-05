@@ -22,18 +22,19 @@ architecture before proposing changes.
 Requirements:
 
 - Python 3.12 or newer
-- Docker and Docker Compose (only for the full service workflow)
+- Docker and Docker Compose (for end-to-end tests and the full service workflow)
 
-Install the package with its optional database and web extras:
+Install the pinned uv version, then sync runtime and development extras from `uv.lock`:
 
 ```bash
-python3 -m pip install -e '.[db,web]'
+python3 -m pip install uv==0.11.28
+uv sync --frozen --extra db --extra web --extra dev
 ```
 
 The offline local simulation runs without PostgreSQL or a model:
 
 ```bash
-PYTHONPATH=src review-gate examples/review_request.json
+PYTHONPATH=src uv run --frozen review-gate examples/review_request.json
 ```
 
 ## Checks your change must pass
@@ -42,27 +43,38 @@ Continuous integration runs the following. Run them locally before opening a pul
 request:
 
 ```bash
+# Verify lockfile matches project metadata
+uv lock --check
+
 # Unit tests
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src uv run --frozen python -m unittest discover -s tests
 
 # Integration tests (service-free)
-python3 -m unittest discover -s tests_integration
+uv run --frozen python -m unittest discover -s tests_integration
+
+# End-to-end tests (real PostgreSQL; requires Docker)
+uv run --frozen python -m unittest discover -s tests_e2e
 
 # Formatting
-ruff format --check .
+uv run --frozen ruff format --check .
 
 # Linting
-ruff check .
+uv run --frozen ruff check .
 
 # Type checking
-mypy src
+uv run --frozen mypy src
 
 # Security static analysis
-bandit -r src
+uv run --frozen bandit -q -r src
 
 # Container build
 docker build --tag repomonster:ci .
 ```
+
+To update dependencies intentionally, run `uv lock` (or `uv lock --upgrade` to
+refresh compatible versions), then sync and run the checks above. Include the
+updated `uv.lock` with the change; keep normal installs frozen. Dependabot checks
+uv dependencies, Docker and Compose image pins, and GitHub Actions weekly.
 
 Add or update tests for any behavior change. New deterministic rules, provider
 handling, retrieval logic, or gate-state changes require test coverage.

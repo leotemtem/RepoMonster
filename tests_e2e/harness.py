@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 ROOT = Path(__file__).resolve().parents[1]
-POSTGRES_IMAGE = "pgvector/pgvector:pg16"
+POSTGRES_IMAGE = "pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f"
 DATABASE_USER = "e2e"
 DATABASE_PASSWORD = "e2e"  # nosec B105 - throwaway container bound to localhost.
 TEMPLATE_DATABASE = "e2e_template"
