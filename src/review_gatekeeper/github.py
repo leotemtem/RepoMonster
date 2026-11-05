@@ -54,9 +54,17 @@ CI_WAITING_STATES = {
 
 
 class GitHubAPIError(RuntimeError):
-    def __init__(self, status: int, method: str, path: str, detail: str) -> None:
+    def __init__(
+        self,
+        status: int,
+        method: str,
+        path: str,
+        detail: str,
+        retry_after_seconds: int | None = None,
+    ) -> None:
         super().__init__(f"GitHub API {method} {path} returned {status}: {detail}")
         self.status = status
+        self.retry_after_seconds = retry_after_seconds
 
 
 class RepositoryConfigurationError(RuntimeError):
@@ -279,6 +287,15 @@ class GitHubClient:
             payload=payload,
         )
 
+    def get_check_run(
+        self, full_name: str, check_run_id: int, token: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/repos/{_repository_path(full_name)}/check-runs/{check_run_id}",
+            token=token,
+        )
+
     def update_check_run(
         self,
         full_name: str,
@@ -386,8 +403,13 @@ class GitHubClient:
                 body = response.read()
         except urlerror.HTTPError as exc:
             detail = _api_error_detail(exc.read())
+            retry_after = exc.headers.get("Retry-After", "")
             raise GitHubAPIError(
-                exc.code, method, path.split("?", 1)[0], detail
+                exc.code,
+                method,
+                path.split("?", 1)[0],
+                detail,
+                int(retry_after) if retry_after.isdigit() else None,
             ) from exc
         if not body:
             return None
@@ -434,6 +456,14 @@ class GitHubReviewProcessor:
         head_sha = str(pull_request["head"]["sha"])
 
         check_run_id = int(job.external_result_id) if job.external_result_id else None
+        if (
+            check_run_id is not None
+            and self.client.get_check_run(full_name, check_run_id, token).get("status")
+            == "completed"
+        ):
+            # An earlier attempt published this and stopped before finishing the job.
+            # Reviewing again could change the published result.
+            return True
         if normalized.head_sha and head_sha != normalized.head_sha:
             if check_run_id is not None:
                 self.client.update_check_run(
@@ -715,7 +745,7 @@ class GitHubReviewProcessor:
                 summary=str(exc),
                 text=(
                     "Add `.repomonster.yml` and its referenced knowledge files to the "
-                    "repository's default branch, then redeliver the webhook or update the PR."
+                    "repository's default branch, then edit the PR description or push a commit."
                 ),
             )
             return True
@@ -782,17 +812,30 @@ class GitHubReviewProcessor:
             summary="Waiting for: " + ", ".join(waiting),
         )
 
-    def mark_terminal_failure(self, job: WebhookJob, error: Exception) -> None:
+    def mark_terminal_failure(self, job: WebhookJob, error: str) -> None:
+        """Publish that the review failed. Raises if it is worth trying again later."""
         try:
             identity = job.payload["repository"]
             full_name = str(identity["full_name"])
-            token = self.client.installation_token(
-                int(job.payload["installation"]["id"]), int(identity["id"])
-            )
+            installation_id = int(job.payload["installation"]["id"])
+            repository_id = int(identity["id"])
+            head_sha = _job_head_sha(job)
+        except (KeyError, TypeError, ValueError):
+            return  # A malformed payload names nothing to publish on.
+        try:
+            token = self.client.installation_token(installation_id, repository_id)
             check_run_id = job.external_result_id
             if not check_run_id:
-                open_run = self._open_check_run(full_name, _job_head_sha(job), token)
+                open_run = self._open_check_run(full_name, head_sha, token)
                 check_run_id = open_run["id"] if open_run else None
+            if not check_run_id and job.event_name == "pull_request":
+                check_run_id = self.client.create_check_run(
+                    full_name,
+                    token,
+                    head_sha=head_sha,
+                    details_url=job.payload["pull_request"].get("html_url"),
+                    external_id=job.delivery_id,
+                )["id"]
             if not check_run_id:
                 return
             self.client.update_check_run(
@@ -802,12 +845,12 @@ class GitHubReviewProcessor:
                 conclusion="action_required",
                 title="RepoMonster could not complete the review",
                 summary="The review failed after all retry attempts. Maintainer review is required.",
-                text=f"{type(error).__name__}: {error}"[:4000],
+                text=error[:4000],
             )
-        except Exception:
-            # The queue retains the original error; a provider outage can also prevent
-            # publication of the terminal state.
-            return
+        except GitHubAPIError as exc:
+            # The repository, commit or installation is gone, so retrying cannot help.
+            if exc.status not in {404, 410, 422}:
+                raise
 
     def _load_policy(
         self, full_name: str, default_branch: str, token: str

@@ -62,7 +62,7 @@ The worker:
 9. persists the run and findings
 10. completes the Check Run
 
-Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. Terminal failure attempts to publish an `action_required` Check Run, because GitHub treats `neutral` as passing for required checks.
+Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. A job that uses up its attempts, including one that keeps killing its worker, is not run again. It stays claimable until an `action_required` Check Run is published, because GitHub treats `neutral` as passing for required checks. Workers survive database outages and retry their queue operations. A retry that finds its Check Run already completed does not review again.
 
 ### Bootstrap
 

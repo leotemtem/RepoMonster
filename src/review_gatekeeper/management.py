@@ -6,13 +6,16 @@ import logging
 import os
 import signal
 import threading
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 from .config import load_repository_config
 from .database import DatabaseMigrator, project_root
 from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
 from .insights import OpenAICompatibleInsightProvider
-from .jobs import WebhookQueue
+from .jobs import WebhookJob, WebhookQueue
 from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .packs import PackSynchronizer, discover_packs
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
@@ -121,6 +124,42 @@ def _sync_local_repository(args) -> int:
     return 0
 
 
+def _retry_on_database_error(
+    operation: Callable[[], Any], stop: threading.Event, logger: logging.Logger
+) -> Any:
+    """Keep the worker alive through a database outage or failover."""
+    import psycopg
+
+    delay = 1.0
+    while True:
+        try:
+            return operation()
+        except psycopg.OperationalError:
+            logger.exception("database unavailable; retrying in %s seconds", delay)
+            if stop.wait(delay):
+                return None
+            delay = min(delay * 2, 30.0)
+
+
+def _publish_terminal_failure(
+    job: WebhookJob,
+    queue: WebhookQueue,
+    processor: GitHubReviewProcessor,
+    stop: threading.Event,
+    logger: logging.Logger,
+) -> None:
+    try:
+        processor.mark_terminal_failure(
+            job, job.last_error or "The worker stopped before finishing this review."
+        )
+    except Exception:
+        logger.exception("could not publish failure for delivery %s", job.delivery_id)
+        _retry_on_database_error(partial(queue.defer_publication, job), stop, logger)
+        return
+    _retry_on_database_error(partial(queue.mark_failed, job.id), stop, logger)
+    logger.error("delivery %s failed permanently", job.delivery_id)
+
+
 def _worker() -> int:
     root = project_root()
     database_url = os.environ["DATABASE_URL"]
@@ -141,8 +180,10 @@ def _worker() -> int:
     )
     queue = WebhookQueue(
         database_url,
-        max_attempts=int(os.getenv("WEBHOOK_MAX_ATTEMPTS", "5")),
+        max_attempts=int(os.getenv("WEBHOOK_MAX_ATTEMPTS", "8")),
         lock_timeout_seconds=int(os.getenv("WEBHOOK_LOCK_TIMEOUT_SECONDS", "900")),
+        retry_base_seconds=float(os.getenv("WEBHOOK_RETRY_BASE_SECONDS", "15")),
+        retry_max_seconds=float(os.getenv("WEBHOOK_RETRY_MAX_SECONDS", "900")),
     )
     processor = GitHubReviewProcessor(
         database_url=database_url,
@@ -162,21 +203,25 @@ def _worker() -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     logger.info("GitHub review worker started")
     while not stop.is_set():
-        job = queue.claim()
+        job = _retry_on_database_error(queue.claim, stop, logger)
         if job is None:
             stop.wait(poll_seconds)
             continue
+        if job.exhausted:
+            _publish_terminal_failure(job, queue, processor, stop, logger)
+            continue
         try:
             processed = processor.process(job)
-            queue.complete(job.id, ignored=not processed)
-            logger.info("delivery %s completed", job.delivery_id)
         except Exception as exc:
-            exhausted = queue.fail(job, exc)
             logger.exception(
                 "delivery %s failed on attempt %s", job.delivery_id, job.attempts
             )
-            if exhausted:
-                processor.mark_terminal_failure(job, exc)
+            _retry_on_database_error(partial(queue.fail, job, exc), stop, logger)
+            continue
+        _retry_on_database_error(
+            partial(queue.complete, job.id, ignored=not processed), stop, logger
+        )
+        logger.info("delivery %s completed", job.delivery_id)
     logger.info("GitHub review worker stopped")
     return 0
 

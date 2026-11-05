@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation, profile selection, issue-reference parsing, and changed-file
   classification. Permanent repository configuration problems now receive an
   actionable result on the first attempt.
+- Review retries now back off for about 45 minutes instead of 30 seconds and honour
+  `Retry-After`. `WEBHOOK_MAX_ATTEMPTS` now defaults to 8.
+- Failed reviews always publish a result, even after a worker crash or GitHub
+  outage. Workers survive database outages, and a crash after publishing no longer
+  reviews the change again.
 - Pull requests whose required CI is still running or has not started now wait
   instead of being blocked, and are re-reviewed when the checks finish. The wait
   ends in `manual_escalation` after `CI_WAIT_TIMEOUT_SECONDS`. GitHub Apps must
