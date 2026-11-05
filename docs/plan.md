@@ -30,7 +30,7 @@ uv run --frozen bandit -q -r src
 - Testing: prefer end-to-end tests in `tests_e2e/`. Keep unit tests only for logic with many branches, such as signature checks, parsers and gate decisions, and remove unit tests that end-to-end tests make redundant.
 - Infrastructure as code: **Terraform**.
 - Review model: **Claude via the Anthropic API**, key in Secrets Manager (AWS) or `.env` (local).
-- Hosting: single-tenant on the owner's AWS account, region eu-west-2 (default; confirm before Phase 1 item 6).
+- Hosting: **single-tenant on the owner's AWS account, region eu-west-2**.
 - Embeddings: **Voyage AI `voyage-4` at 1024 dimensions**, key in Secrets Manager or `.env` as `VOYAGE_API_KEY`.
 
 ## Phase 0: streamline
