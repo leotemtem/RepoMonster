@@ -1,4 +1,11 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30 AS requirements
+
+WORKDIR /build
+RUN pip install --no-cache-dir uv==0.11.28
+COPY pyproject.toml uv.lock README.md ./
+RUN uv export --frozen --no-dev --no-emit-project --extra db --extra web --output-file requirements.txt
+
+FROM python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,9 +13,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+COPY --from=requirements /build/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir '.[db,web]'
+RUN pip install --no-cache-dir --no-deps .
 
 COPY db ./db
 COPY profiles ./profiles

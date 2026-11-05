@@ -57,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Recorded MIT licensing in `pyproject.toml` project metadata.
+- Locked runtime and development dependencies in `uv.lock`; CI installs frozen
+  dependencies and the runtime image installs hash-verified dependencies without
+  development tools or uv. Pinned Python and PostgreSQL/pgvector images by digest
+  and GitHub Actions by commit SHA, with weekly Dependabot updates.
 - Raised the supported Python floor to 3.12 and pinned development tooling used
   by CI.
 

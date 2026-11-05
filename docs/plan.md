@@ -8,14 +8,19 @@ Each numbered item below is sized to be one pull request. Work top to bottom; la
 
 1. Read `docs/roadmap.md`, then this file.
 2. Find the first unticked item and branch from `main` as `phase-N/<short-name>`.
-3. Before opening the PR, run the baseline checks (the `dev` extra arrives in item 0.2; until then install ruff, mypy, types-PyYAML and Bandit separately):
+3. Before opening the PR, run the baseline checks from the lockfile:
 
 ```bash
-python -m pip install -e '.[db,web,dev]'
-PYTHONPATH=src python -m unittest discover -s tests
-python -m unittest discover -s tests_integration
-python -m unittest discover -s tests_e2e  # requires Docker
-ruff format --check . && ruff check . && mypy src && bandit -q -r src
+python -m pip install uv==0.11.28
+uv lock --check
+uv sync --frozen --extra db --extra web --extra dev
+PYTHONPATH=src uv run --frozen python -m unittest discover -s tests
+uv run --frozen python -m unittest discover -s tests_integration
+uv run --frozen python -m unittest discover -s tests_e2e  # requires Docker
+uv run --frozen ruff format --check .
+uv run --frozen ruff check .
+uv run --frozen mypy src
+uv run --frozen bandit -q -r src
 ```
 
 4. Tick the item in this file in the same PR.
@@ -37,7 +42,7 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
     - Done when: end-to-end tests cover a model failure and exhausted retries.
 - [x] **0.2 Pin tooling (F3, F12, F13).** Add a `dev` extra with pinned ruff, mypy, types-PyYAML and Bandit. Add `[tool.ruff]` with an explicit rule set, run `ruff check --fix`, fix the remainder. Raise `requires-python` to `>=3.12`. Merge the format, ruff and mypy CI jobs into one.
     - Done when: CI is green with pinned versions and no unpinned `pip install` remains in `ci.yml`.
-- [ ] **0.3 Lock dependencies and pin images (F4).** `uv lock` (commit `uv.lock`) or `pip-compile --generate-hashes`. Install from the lock in the Dockerfile and CI. Pin `python:3.12-slim` and `pgvector/pgvector:pg16` by digest. Pin every Action by commit SHA with the tag in a comment. Add a Renovate or Dependabot config covering pip, Docker and Actions.
+- [x] **0.3 Lock dependencies and pin images (F4).** `uv lock` (commit `uv.lock`) or `pip-compile --generate-hashes`. Install from the lock in the Dockerfile and CI. Pin `python:3.12-slim` and `pgvector/pgvector:pg16` by digest. Pin every Action by commit SHA with the tag in a comment. Add a Renovate or Dependabot config covering pip, Docker and Actions.
 - [x] **0.4 Close the GitLab route (F5).** Remove `/webhooks/gitlab` until GitLab support ships, keeping `normalize_gitlab_event` and its tests.
 - [ ] **0.5 Shared HTTP client (F7).** New `http.py` on httpx with per-call timeouts, retries with backoff on 429/5xx and `Retry-After`. Move the GitHub and embedding clients onto it; make the embedding timeout configurable.
 - [ ] **0.6 Connection pool and service factory (F8, F9).** One `psycopg_pool.ConnectionPool` built at startup and injected into the queue, repository and processor. One `build_review_service()` used by both `app.py` and the worker. `/readyz` uses a public repository method.
