@@ -24,7 +24,7 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 - Infrastructure as code: **Terraform**.
 - Review model: **Claude via the Anthropic API**, key in Secrets Manager (AWS) or `.env` (local).
 - Hosting: single-tenant on the owner's AWS account, region eu-west-2 (default; confirm before Phase 1 item 6).
-- Open: embedding provider (OpenAI or Voyage AI). Anthropic has no embedding model. Decide before Phase 2 item 2.
+- Embeddings: **Voyage AI `voyage-4` at 1024 dimensions**, key in Secrets Manager or `.env` as `VOYAGE_API_KEY`.
 
 ## Phase 0: streamline
 
@@ -45,7 +45,7 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 - [ ] **1.1 Runtime changes for AWS.** Accept `GITHUB_PRIVATE_KEY` (PEM in an env var) as well as the key path; JSON log format; a metrics emitter for queue depth, review latency and model error rate (CloudWatch embedded metric format in logs).
 - [ ] **1.2 Terraform skeleton.** `infra/` with modules `network`, `data`, `compute`, `ci` and an `envs/prod` root. S3 remote state with locking. `terraform fmt`, `validate` and `tflint` in CI.
 - [ ] **1.3 Network module.** VPC across two AZs, private subnets for tasks and RDS, public subnets for the ALB and one NAT gateway, VPC endpoints for ECR, Secrets Manager, CloudWatch Logs and S3.
-- [ ] **1.4 Data module.** RDS PostgreSQL 16 (pgvector enabled by the migrations), encrypted, automated backups, security group open only to the task security group. Secrets Manager entries for the database URL, GitHub App key, webhook secret, `ANTHROPIC_API_KEY` and the embedding key.
+- [ ] **1.4 Data module.** RDS PostgreSQL 16 (pgvector enabled by the migrations), encrypted, automated backups, security group open only to the task security group. Secrets Manager entries for the database URL, GitHub App key, webhook secret, `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`.
 - [ ] **1.5 Compute module.** ECR repository with scan on push; ECS cluster; API service behind the ALB (ACM certificate, health check on `/healthz`); worker service with queue-depth autoscaling; bootstrap task definition for migrations and pack sync.
 - [ ] **1.6 CI/CD.** GitHub Actions OIDC role (no stored AWS keys). On merge to `main`: build, push by digest, run the bootstrap task, then update both services.
 - [ ] **1.7 Cut-over.** Point the GitHub App webhook at the ALB hostname, redeliver a test event, confirm a Check Run publishes. Add the AWS runbook to `docs/operations.md`.
@@ -53,9 +53,10 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 ## Phase 2: Claude and OpenAI providers
 
 - [ ] **2.1 Schema compatibility.** Remove `maxItems` from `FINDINGS_RESPONSE_FORMAT`, lower-case `recommendation` before parsing, and treat `refusal` and `max_tokens` stop reasons as explicit errors. Keep the evidence truncation in code.
-- [ ] **2.2 Provider selection.** `INSIGHT_PROVIDER` (`anthropic` default, `openai`, `openai_compatible`) and `EMBEDDING_PROVIDER` (`openai`, `voyage`, `openai_compatible`), resolved in the service factory from 0.6.
+- [ ] **2.2 Provider selection.** `INSIGHT_PROVIDER` (`anthropic` default, `openai`, `openai_compatible`) and `EMBEDDING_PROVIDER` (`voyage` default, `openai`, `openai_compatible`), resolved in the service factory from 0.6.
 - [ ] **2.3 Anthropic adapter.** Official `anthropic` SDK, Messages API with `output_config.format` JSON schema, SDK retries enabled, prompt caching on the system prompt and standards block. Transient errors raise to the job queue (closes F6).
-- [ ] **2.4 OpenAI and Voyage adapters.** Official SDKs for OpenAI chat and embeddings and for Voyage embeddings (`input_type` document vs query).
+- [ ] **2.4 Voyage and OpenAI adapters.** `voyageai` SDK for embeddings with `input_type=document` for packs and knowledge and `input_type=query` for the review query, batched at up to 1,000 texts per request. Update `.env.example` to `EMBEDDING_PROVIDER=voyage`, `EMBEDDING_MODEL=voyage-4`, `EMBEDDING_DIMENSIONS=1024`. Official OpenAI SDK for chat and embeddings as the alternative.
+    - Done when: a fresh database bootstraps at 1024 dimensions and `standards reindex` succeeds against Voyage.
 - [ ] **2.5 Contract tests and comparison.** Recorded-response tests per adapter. A small fixture set of PRs with expected gate outcomes to compare models before switching defaults.
 
 ## Phase 3: security gate

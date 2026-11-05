@@ -24,7 +24,7 @@ Order of work, each phase shipping on its own:
 | --- | --- | --- |
 | Infrastructure as code | Terraform | Decided |
 | Model access | Claude through the Anthropic API with an API key (stored in Secrets Manager) | Decided |
-| Embeddings | Anthropic has no embedding model; pick OpenAI or Voyage AI | Open |
+| Embeddings | Voyage AI `voyage-4` at 1024 dimensions (Anthropic has no embedding model) | Decided |
 | Hosting model | Single-tenant on the owner's AWS account, built so it can go multi-tenant later | Default, unconfirmed |
 | Code delivery | Branches and PRs on `leotemtem/repomonster` | Decided |
 
@@ -58,7 +58,7 @@ Run the existing two-process design (API plus worker) as two ECS Fargate service
 flowchart LR
     GH[GitHub<br/>App webhooks and REST API]
     LLM[Anthropic API<br/>Claude]
-    EMB[Embedding API<br/>OpenAI or Voyage]
+    EMB[Voyage AI<br/>voyage-4 embeddings]
     subgraph VPC[VPC, private subnets, eu-west-2]
         ALB[ALB<br/>TLS, ACM certificate]
         API[API service<br/>Fargate, verify and enqueue]
@@ -84,7 +84,7 @@ The API only verifies and enqueues; the worker makes all GitHub and model calls,
 | Review worker | ECS Fargate service, no inbound traffic | Scale on queue depth (a CloudWatch metric the worker publishes). SIGTERM handling already exists. |
 | Migrations and pack bootstrap | One-off ECS task run by the deploy pipeline | Replaces the Compose `bootstrap` service. |
 | Database | RDS PostgreSQL 16, Multi-AZ optional | RDS supports pgvector with HNSW indexes ([AWS](https://aws.amazon.com/about-aws/whats-new/2023/10/amazon-rds-postgresql-pgvector-hnsw-indexing/)). Needs the connection pool from finding 8. |
-| Secrets | Secrets Manager, injected through the task definition | GitHub App key, webhook secret, `ANTHROPIC_API_KEY`, embedding key. Add `GITHUB_PRIVATE_KEY` (PEM in an env var) alongside the file path. |
+| Secrets | Secrets Manager, injected through the task definition | GitHub App key, webhook secret, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`. Add `GITHUB_PRIVATE_KEY` (PEM in an env var) alongside the file path. |
 | Images | ECR with scan on push | Digest-pinned base image (finding 4). |
 | Logs and metrics | CloudWatch Logs, JSON log format | Add queue depth, review latency and model error rate. |
 | Infrastructure as code | Terraform | Modules: `network`, `data`, `compute`, `ci`. Remote state in S3 with locking. Deploy from GitHub Actions through OIDC, no long-lived AWS keys. |
@@ -103,8 +103,9 @@ Add native adapters behind the existing `InsightProvider` and `EmbeddingProvider
 | --- | --- | --- |
 | `INSIGHT_PROVIDER` | `anthropic` (default), `openai`, `openai_compatible` | `anthropic` uses the Messages API with `output_config.format` (GA, no beta header). `openai` uses the official SDK with a strict `json_schema`. |
 | `ANTHROPIC_API_KEY` | secret | From Secrets Manager on AWS, `.env` locally. |
-| `EMBEDDING_PROVIDER` | `openai`, `voyage`, `openai_compatible` | Anthropic has no embedding model and recommends Voyage AI ([docs](https://platform.claude.com/docs/en/build-with-claude/embeddings)). |
-| `INSIGHT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | as today | Dimensions remain database state: a change needs a migration and a full reindex of packs and repository knowledge. |
+| `EMBEDDING_PROVIDER` | `voyage` (default), `openai`, `openai_compatible` | Anthropic has no embedding model and recommends Voyage AI ([docs](https://platform.claude.com/docs/en/build-with-claude/embeddings)). Default model `voyage-4`: 32K-token context, up to 1,000 texts per request ([docs](https://docs.voyageai.com/docs/embeddings)). Embed knowledge with `input_type=document` and the review query with `input_type=query`. |
+| `VOYAGE_API_KEY` | secret | Voyage pricing is $0.06 per 1M tokens for `voyage-4`, with 200M free tokens ([pricing](https://docs.voyageai.com/docs/pricing)). |
+| `INSIGHT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | `EMBEDDING_DIMENSIONS=1024` | `voyage-4` offers 256, 512, 1024 (default) or 2048. Use 1024: pgvector's HNSW index on the `vector` type is limited to 2,000 dimensions, which rules out 2048. A new database (the AWS one) takes the value at its first migration; the existing 1536 Compose database needs recreating or a migration plus full reindex. |
 
 Three changes are needed in `insights.py` before the Anthropic adapter will work:
 
@@ -187,3 +188,5 @@ Store it in two new tables (`attack_patterns`, `pattern_occurrences`) with an em
 - [RDS PostgreSQL pgvector with HNSW](https://aws.amazon.com/about-aws/whats-new/2023/10/amazon-rds-postgresql-pgvector-hnsw-indexing/)
 - [OSV querybatch](https://google.github.io/osv.dev/post-v1-querybatch)
 - [deps.dev API](https://blog.deps.dev/api/)
+- [Voyage AI text embeddings](https://docs.voyageai.com/docs/embeddings)
+- [Voyage AI pricing](https://docs.voyageai.com/docs/pricing)
