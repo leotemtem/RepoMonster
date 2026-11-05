@@ -15,7 +15,7 @@ from .config import load_repository_config
 from .database import DatabaseMigrator, database_connect_timeout, project_root
 from .factory import build_review_service
 from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
-from .jobs import LostJobLock, WebhookJob, WebhookQueue
+from .jobs import LostJobLock, WebhookJob, WebhookQueue, WorkerStopping
 from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .packs import PackSynchronizer, discover_packs
 from .pool import build_connection_pool
@@ -71,7 +71,7 @@ def _sync(force: bool) -> int:
 def _sync_local_repository(args) -> int:
     checkout = args.checkout.resolve()
     config_path = checkout / ".repomonster.yml"
-    if not config_path.is_file():
+    if not config_path.resolve().is_relative_to(checkout) or not config_path.is_file():
         raise RuntimeError(f"Repository configuration not found: {config_path}")
     config_content = config_path.read_text()
     config = load_repository_config(config_content)
@@ -85,7 +85,7 @@ def _sync_local_repository(args) -> int:
     for source_type, patterns in source_groups:
         for pattern in patterns:
             for path in sorted(checkout.glob(pattern)):
-                if not path.is_file():
+                if not path.resolve().is_relative_to(checkout) or not path.is_file():
                     continue
                 relative = path.relative_to(checkout).as_posix()
                 if relative in seen:
@@ -123,6 +123,26 @@ def _sync_local_repository(args) -> int:
         f"repository synchronized: id={repository_id} key={repository_key} "
         f"sources={len(sources)}"
     )
+    return 0
+
+
+def _prune(days: int) -> int:
+    if days < 1:
+        raise ValueError("Retention days must be positive")
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "DELETE FROM webhook_deliveries "
+            "WHERE status IN ('completed', 'failed', 'ignored') "
+            "AND updated_at < now() - make_interval(days => %s)",
+            (days,),
+        )
+        deliveries = cursor.rowcount
+        cursor.execute(
+            "DELETE FROM review_runs WHERE created_at < now() - make_interval(days => %s)",
+            (days,),
+        )
+        reviews = cursor.rowcount
+    print(f"pruned: {deliveries} deliveries, {reviews} reviews")
     return 0
 
 
@@ -208,15 +228,16 @@ def _worker() -> int:
         retry_base_seconds=float(os.getenv("WEBHOOK_RETRY_BASE_SECONDS", "15")),
         retry_max_seconds=float(os.getenv("WEBHOOK_RETRY_MAX_SECONDS", "900")),
     )
+    stop = threading.Event()
     processor = GitHubReviewProcessor(
         pool=pool,
         queue=queue,
         client=GitHubClient(GitHubSettings.from_environment()),
         embedding_provider=embedding_provider,
         review_service=review_service,
+        stop=stop,
     )
     poll_seconds = float(os.getenv("WORKER_POLL_SECONDS", "2"))
-    stop = threading.Event()
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -240,6 +261,12 @@ def _worker() -> int:
                     processed = processor.process(job)
             except LostJobLock:
                 logger.warning("delivery %s lost its lock; stopping", job.delivery_id)
+                continue
+            except WorkerStopping:
+                _retry_on_database_error(partial(queue.release, job), stop, logger)
+                logger.info(
+                    "delivery %s returned to pending for shutdown", job.delivery_id
+                )
                 continue
             except Exception as exc:
                 logger.exception(
@@ -282,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
     sync_local.add_argument("--default-branch", default="main")
     commands.add_parser("bootstrap")
     commands.add_parser("worker")
+    prune = commands.add_parser("prune")
+    prune.add_argument(
+        "--days", type=int, default=int(os.getenv("RETENTION_DAYS", "90"))
+    )
     args = parser.parse_args(argv)
 
     if args.command == "db" and args.db_command == "migrate":
@@ -295,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
         return _sync(force=False)
     if args.command == "worker":
         return _worker()
+    if args.command == "prune":
+        return _prune(args.days)
     parser.error("Unsupported command")
     return 2
 

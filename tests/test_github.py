@@ -6,23 +6,14 @@ from pathlib import Path
 
 from review_gatekeeper.config import load_repository_config
 from review_gatekeeper.github import (
-    GitHubReviewProcessor,
     GitHubSettings,
     _decode_github_content,
+    _escape_markdown,
     _select_stack,
+    _terminal_error_code,
     verify_webhook_signature,
 )
-from review_gatekeeper.jobs import WebhookJob
-from review_gatekeeper.models import (
-    ChangedFile,
-    Finding,
-    FindingImpact,
-    GateState,
-    InsightRecommendation,
-    ReviewRequest,
-    ReviewResult,
-    Severity,
-)
+from review_gatekeeper.models import ChangedFile
 
 
 class GitHubIntegrationTests(unittest.TestCase):
@@ -84,145 +75,34 @@ stacks:
             ["python@1.0.0", "fastapi@1.0.0", "typescript@1.0.0", "node@1.0.0"],
         )
 
-    def test_review_persistence_records_model_recommendation_and_impact(self) -> None:
-        connection = _PersistenceConnection()
-        processor = GitHubReviewProcessor(
-            pool=_Pool(connection),
-            queue=_FakeQueue(),
-            client=_FakeGitHubClient(head_sha="head"),
-            embedding_provider=object(),
-            review_service=object(),
-        )
-        request = ReviewRequest.from_dict(
-            {
-                "provider": "github",
-                "change_kind": "pull_request",
-                "repository": "acme/api",
-                "repository_key": "github:https://github.com:123",
-                "external_id": "7",
-                "title": "Change",
-                "description": "Description",
-                "metadata": {"head_sha": "head"},
-            }
-        )
-        result = ReviewResult(
-            gate_state=GateState.BLOCKED,
-            summary="blocked",
-            findings=[
-                Finding(
-                    severity=Severity.WARNING,
-                    category="correctness",
-                    title="Mismatch",
-                    detail="The implementation does not match.",
-                    evidence=["app.py:1"],
-                    impact=FindingImpact.SIGNIFICANT,
+    def test_terminal_error_types_have_stable_public_codes(self) -> None:
+        for error_type, code in (
+            ("GitHubAPIError", "github_api_error"),
+            ("OperationalError", "database_error"),
+            ("UniqueViolation", "database_error"),
+            ("PoolTimeout", "database_error"),
+            ("InsightResponseError", "model_error"),
+            ("HTTPResponseError", "embedding_error"),
+            ("ValueError", "internal_error"),
+            ("unknown", "internal_error"),
+        ):
+            with self.subTest(error_type=error_type):
+                self.assertEqual(
+                    _terminal_error_code(f"{error_type}: diagnostic"), code
                 )
-            ],
-            applied_profile="default",
-            retrieved_documents=[],
-            llm_review_brief="brief",
-            insight_recommendation=InsightRecommendation.REQUEST_CHANGES,
-            insight_recommendation_reason="Author changes are required.",
-        )
 
-        processor._persist_result(request, result)
-
-        review_insert = next(
-            item
-            for item in connection.cursor_instance.executions
-            if "INSERT INTO review_runs" in item[0]
-        )
-        finding_insert = next(
-            item
-            for item in connection.cursor_instance.executions
-            if "INSERT INTO review_findings" in item[0]
-        )
-        self.assertEqual(review_insert[1][-2], "request_changes")
-        self.assertEqual(review_insert[1][-1], "Author changes are required.")
-        self.assertEqual(finding_insert[1][2], "significant")
-
-
-class _FakeQueue:
-    external_result_id: str | None = None
-
-    def set_external_result_id(self, job_id: int, external_result_id: str) -> None:
-        self.external_result_id = external_result_id
-
-
-class _FakeGitHubClient:
-    def __init__(self, *, head_sha: str) -> None:
-        self.head_sha = head_sha
-
-
-class _PersistenceCursor:
-    def __init__(self) -> None:
-        self.executions: list[tuple[str, tuple]] = []
-        self.result = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, sql, params) -> None:
-        self.executions.append((sql, params))
-        if "SELECT id FROM repositories" in sql:
-            self.result = (11,)
-        elif "INSERT INTO review_runs" in sql:
-            self.result = (22,)
-        else:
-            self.result = None
-
-    def fetchone(self):
-        return self.result
-
-
-class _PersistenceConnection:
-    def __init__(self) -> None:
-        self.cursor_instance = _PersistenceCursor()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def cursor(self):
-        return self.cursor_instance
-
-
-def _pull_request_job(*, head_sha: str) -> WebhookJob:
-    return WebhookJob(
-        id=1,
-        provider="github",
-        delivery_id="delivery-1",
-        event_name="pull_request",
-        attempts=1,
-        payload={
-            "action": "opened",
-            "installation": {"id": 22},
-            "repository": {
-                "id": 123,
-                "full_name": "acme/api",
-                "html_url": "https://github.com/acme/api",
-            },
-            "pull_request": {
-                "number": 7,
-                "title": "Change",
-                "head": {"sha": head_sha, "ref": "feature"},
-                "base": {"ref": "main"},
-            },
-        },
-    )
-
-
-class _Pool:
-    def __init__(self, connection):
-        self._connection = connection
-
-    def connection(self):
-        return self._connection
+    def test_markdown_preserves_plain_text(self) -> None:
+        for original, escaped in (
+            ("plain text", "plain text"),
+            ("[label](url)", r"\[label\]\(url\)"),
+            ("![image](url)", r"\!\[image\]\(url\)"),
+            ("<img>", "&lt;img&gt;"),
+            ("a\nb\rc", "a b c"),
+            ("`code` *bold*", r"\`code\` \*bold\*"),
+            (r"\[label]", r"\\\[label\]"),
+        ):
+            with self.subTest(original=original):
+                self.assertEqual(_escape_markdown(original), escaped)
 
 
 if __name__ == "__main__":

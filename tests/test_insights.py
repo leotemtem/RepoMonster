@@ -28,6 +28,7 @@ class InsightProviderTests(unittest.TestCase):
             {
                 "choices": [
                     {
+                        "finish_reason": "stop",
                         "message": {
                             "content": json.dumps(
                                 {
@@ -46,7 +47,7 @@ class InsightProviderTests(unittest.TestCase):
                                     "recommendation_reason": "The contract mismatch needs correction.",
                                 }
                             )
-                        }
+                        },
                     }
                 ]
             }
@@ -87,6 +88,7 @@ class InsightProviderTests(unittest.TestCase):
             {
                 "choices": [
                     {
+                        "finish_reason": "stop",
                         "message": {
                             "content": json.dumps(
                                 {
@@ -95,7 +97,7 @@ class InsightProviderTests(unittest.TestCase):
                                     "recommendation_reason": "No material issues found.",
                                 }
                             )
-                        }
+                        },
                     }
                 ]
             }
@@ -116,10 +118,11 @@ class InsightProviderTests(unittest.TestCase):
             {
                 "choices": [
                     {
+                        "finish_reason": "stop",
                         "message": {
                             "content": "",
                             "reasoning_content": "An unfinished analysis",
-                        }
+                        },
                     }
                 ]
             }
@@ -142,6 +145,7 @@ class InsightProviderTests(unittest.TestCase):
             {
                 "choices": [
                     {
+                        "finish_reason": "stop",
                         "message": {
                             "content": "",
                             "reasoning_content": json.dumps(
@@ -161,7 +165,7 @@ class InsightProviderTests(unittest.TestCase):
                                     "recommendation_reason": "The implementation violates the contract.",
                                 }
                             ),
-                        }
+                        },
                     }
                 ]
             }
@@ -182,7 +186,14 @@ class InsightProviderTests(unittest.TestCase):
         provider = OpenAICompatibleInsightProvider("http://model.test/v1", "test-model")
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
-            {"choices": [{"message": {"content": '{"findings": []}'}}]}
+            {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": '{"findings": []}'},
+                    }
+                ]
+            }
         ).encode()
 
         with (

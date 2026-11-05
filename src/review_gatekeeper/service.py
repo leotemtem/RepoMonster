@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
+from collections.abc import Callable
 
 from .insights import InsightProvider
 from .models import (
@@ -43,10 +45,16 @@ class ReviewService:
         self.insight_provider = insight_provider
 
     def review(
-        self, request: ReviewRequest, profile_id: str = "default"
+        self,
+        request: ReviewRequest,
+        profile_id: str = "default",
+        *,
+        before_expensive_step: Callable[[], None] | None = None,
     ) -> ReviewResult:
         profile = self.repository.load_profile(profile_id, request)
         applied_profile = profile.id
+        if before_expensive_step:
+            before_expensive_step()
         standards = self.repository.retrieve(request, profile)
         deterministic_findings = self.rule_engine.evaluate(request, profile, standards)
         findings = list(deterministic_findings)
@@ -67,11 +75,14 @@ class ReviewService:
                 )
             )
         insight_result: InsightResult | None = None
+        if before_expensive_step:
+            before_expensive_step()
         if self.insight_provider:
             try:
                 insight_result = self.insight_provider.generate(llm_review_brief)
                 findings.extend(insight_result.findings)
             except Exception as exc:
+                logging.getLogger(__name__).exception("Insight generation failed")
                 # Deterministic errors block with or without the model's opinion.
                 blocked = any(item.severity == Severity.ERROR for item in findings)
                 return ReviewResult(
@@ -89,7 +100,7 @@ class ReviewService:
                             severity=Severity.ERROR,
                             category="insight_provider",
                             title="Insight generation failed",
-                            detail=str(exc),
+                            detail=type(exc).__name__,
                         )
                     ],
                     applied_profile=applied_profile,

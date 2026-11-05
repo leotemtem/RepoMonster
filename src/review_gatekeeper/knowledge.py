@@ -132,7 +132,6 @@ class RepositoryKnowledgeSynchronizer:
                     config_sha = EXCLUDED.config_sha,
                     review_settings = EXCLUDED.review_settings,
                     model_profile = EXCLUDED.model_profile,
-                    enabled = true,
                     updated_at = now()
                 RETURNING id
                 """,
@@ -232,6 +231,11 @@ class RepositoryKnowledgeSynchronizer:
         )
         with self.connection.cursor() as cursor:
             if self._document_is_current(cursor, document_id, checksum, chunks):
+                cursor.execute(
+                    "UPDATE standard_documents SET enabled = false, updated_at = now() "
+                    "WHERE logical_key = %s AND id <> %s",
+                    (logical_key, document_id),
+                )
                 cursor.execute(
                     "UPDATE standard_documents SET enabled = true, updated_at = now() WHERE id = %s",
                     (document_id,),

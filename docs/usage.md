@@ -319,7 +319,11 @@ The response contains:
 - the model's `insight_recommendation` and rationale when insight analysis ran
 - `applied_profile`
 - retrieved document IDs
-- the generated model review brief
+
+The direct API omits the model review brief. GitHub Check Runs display finding
+titles, details, and evidence as text; their summaries contain service-generated
+status information. Processing failures publish a stable error code and direct
+maintainers to the worker logs for diagnostics.
 
 For production RAG, the supplied `repository_key` must identify a repository already onboarded in PostgreSQL. The direct endpoint does not fetch provider data, validate that a diff is authoritative, or publish a Check Run; the caller is responsible for constructing trustworthy request evidence.
 

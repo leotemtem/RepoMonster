@@ -44,7 +44,13 @@ cp .env.example .env
 | `TENANT_KEY` | no | optional company-policy retrieval namespace; ingestion is not yet public |
 | `LOG_LEVEL` | no | worker logging level; defaults to `INFO` |
 
-Generate passwords and API keys with a cryptographically secure tool. Do not commit `.env`.
+Generate passwords and API keys with a cryptographically secure tool. Do not commit `.env`. `POSTGRES_PASSWORD` must be URL-safe because Compose interpolates it into `DATABASE_URL`; use letters, digits, hyphens, and underscores.
+
+The API, worker, and bootstrap containers drop all Linux capabilities, enable
+`no-new-privileges`, and run with read-only root filesystems and a writable `/tmp`
+tmpfs. Memory limits default to `512m`, `1g`, and `512m` respectively, overridable
+through `API_MEMORY_LIMIT`, `WORKER_MEMORY_LIMIT`, and `BOOTSTRAP_MEMORY_LIMIT` in
+the Compose environment. Size them for your workload, including temporary files.
 
 ### Database connections and timeouts
 
@@ -404,8 +410,11 @@ docker compose restart postgres
 docker compose up -d api worker
 ```
 
-The worker handles `SIGTERM` by finishing the job it is processing and then
-exiting. The Compose file allows three minutes for this. Increase
+The worker handles `SIGTERM` by checking for shutdown before source embeddings,
+retrieval embeddings, and the model call. Before the model call starts, it returns
+unfinished work to pending immediately without consuming an attempt. An active
+model call finishes, and its result is persisted and published before exit. The
+Compose file allows three minutes for this. Increase
 `stop_grace_period` if reviews can take longer; forcibly killing a worker leaves
 its job in `processing` until `WEBHOOK_LOCK_TIMEOUT_SECONDS` elapses.
 
@@ -681,7 +690,7 @@ docker compose up -d --build
 docker compose logs --tail=100 bootstrap api worker
 ```
 
-Bootstrap applies pending migrations automatically. Applied migration files are checksummed and must not be edited; add a new numbered SQL migration.
+Bootstrap applies pending migrations automatically. Applied migration files are checksummed and must not be edited or removed; add a new numbered SQL migration. A mismatch between stored dimensions and `EMBEDDING_DIMENSIONS` requires recreating or reindexing the database before migration. Back up the database and plan the schema/vector transition first; changing the environment variable alone does not perform a reindex. Migration 005 requires one enabled version per repository/task logical document; inspect and reconcile any pre-existing duplicates before upgrading.
 
 If only worker code changed and no migration was added:
 
@@ -720,8 +729,8 @@ review-gate examples/review_request.json
 
 ## Stopping and restarting
 
-For a planned shutdown, stop webhook ingestion, allow the worker to drain its
-current delivery, and then remove the containers:
+For a planned shutdown, stop webhook ingestion, allow the worker to finish its
+active model call or return earlier work to pending, and then remove the containers:
 
 ```bash
 docker compose stop api
@@ -759,7 +768,28 @@ docker compose exec -T postgres sh -lc \
 
 Store the dump outside the VPS and protect it as potentially sensitive repository metadata.
 
-RepoMonster currently has no automatic retention or pruning command. Webhook payloads, document versions, review runs, and findings accumulate until an operator introduces a retention policy. Do not delete rows without understanding document and review foreign-key relationships.
+Run retention maintenance on an operator-controlled schedule:
+
+```bash
+docker compose run --rm bootstrap repomonster prune --days 90
+```
+
+`--days` must be positive. If omitted, it uses `RETENTION_DAYS`, default `90`.
+The command deletes terminal (`completed`, `failed`, `ignored`) webhook deliveries
+whose last update is older than the cutoff, and review runs created before the
+cutoff. Findings are removed with their review runs. Pending and processing jobs
+are preserved regardless of age. An explicit `--days` overrides `RETENTION_DAYS`.
+
+Stored review request payloads omit `diff_excerpt`; bounded model briefs may still
+contain diff text until their review run is pruned. Existing stored payloads are
+not rewritten during upgrade. Knowledge document history is not pruned by this
+command. Backups and Docker logs need their own retention schedules.
+
+Check Runs publish stable processing error codes and directions to inspect worker
+logs. Full diagnostics remain in `webhook_deliveries.last_error` and worker logs;
+insight failures publish only the exception type. Treat these operator records as
+sensitive. Disabled repository and installation rows stay disabled during sync;
+workers ignore deliveries for those identities.
 
 ## Troubleshooting
 

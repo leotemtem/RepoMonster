@@ -129,6 +129,7 @@ class FakeGitHub:
         self.check_runs: list[dict[str, Any]] = []
         self.model_calls = 0
         self.model_briefs: list[str] = []
+        self.model_response: dict[str, Any] | None = None
         self.add_pull_request()
 
         fake = self
@@ -256,7 +257,11 @@ class FakeGitHub:
                 with self.lock:
                     self.model_calls += 1
                     self.model_briefs.append(payload["messages"][-1]["content"])
-                status, body = 500, {"message": "model unavailable"}
+                status, body = (
+                    (200, self.model_response)
+                    if self.model_response is not None
+                    else (500, {"message": "model unavailable"})
+                )
             else:
                 with self.lock:
                     self.requests.append((method, handler.path))
@@ -337,6 +342,17 @@ class FakeGitHub:
                 self.token_requests.append(payload or {})
             if (payload or {}).get("repository_ids") != [REPOSITORY_ID]:
                 return 422, {"message": "Token must be scoped to the repository"}
+            if (payload or {}).get("permissions") != {
+                "checks": "write",
+                "contents": "read",
+                "issues": "read",
+                "metadata": "read",
+                "pull_requests": "read",
+                "statuses": "read",
+            }:
+                return 422, {
+                    "message": "Token permissions must match the worker's needs"
+                }
             return 201, {"token": "ghs_e2e", "expires_at": "2099-01-01T00:00:00Z"}
         if bearer != "ghs_e2e":
             return 401, {"message": "Bad credentials"}

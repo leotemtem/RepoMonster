@@ -16,6 +16,11 @@ services:
 
   bootstrap:
     build: .
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: ${BOOTSTRAP_MEMORY_LIMIT:-512m}
     command: ["repomonster", "bootstrap"]
     env_file: .env
     environment:
@@ -27,6 +32,11 @@ services:
 
   api:
     build: .
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: ${API_MEMORY_LIMIT:-512m}
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-repomonster}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-repomonster}
@@ -44,6 +54,11 @@ services:
 
   worker:
     build: .
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: ${WORKER_MEMORY_LIMIT:-1g}
     command: ["repomonster", "worker"]
     env_file: .env
     environment:
