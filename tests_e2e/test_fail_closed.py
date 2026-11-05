@@ -57,3 +57,20 @@ class PullRequestStateTests(EndToEndTestCase):
         self.wait_for_delivery("old", status="ignored")
 
         self.assertEqual(self.github.check_runs, [])
+
+
+class ModelFailureWithErrorsTests(EndToEndTestCase):
+    use_model = True
+
+    def test_deterministic_errors_show_as_blocked(self) -> None:
+        self.github.set_ci(DEFAULT_REQUIRED_CI)
+        self.github.add_pull_request(body="Fixes #42")
+
+        self.send_webhook("pull_request", self.pull_request_payload(), delivery="open")
+        self.wait_for_delivery("open")
+
+        self.assertEqual(self.github.model_calls, 1)
+        self.assertEqual(self.github.check_runs[0]["conclusion"], "action_required")
+        self.assertEqual(
+            self.query("SELECT gate_state FROM review_runs"), [("blocked",)]
+        )

@@ -218,19 +218,37 @@ class GitHubClient:
     def list_check_runs(
         self, full_name: str, ref: str, token: str
     ) -> list[dict[str, Any]]:
-        response = self._request(
-            "GET",
-            f"/repos/{_repository_path(full_name)}/commits/{urlparse.quote(ref, safe='')}/check-runs?per_page=100",
-            token=token,
-        )
-        return list(response.get("check_runs", []))
+        checks = []
+        page = 1
+        while True:
+            response = self._request(
+                "GET",
+                f"/repos/{_repository_path(full_name)}/commits/{urlparse.quote(ref, safe='')}/check-runs?per_page=100&page={page}",
+                token=token,
+            )
+            items = response.get("check_runs", [])
+            checks.extend(items)
+            if len(items) < 100:
+                return checks
+            page += 1
 
     def combined_status(self, full_name: str, ref: str, token: str) -> dict[str, Any]:
-        return self._request(
-            "GET",
-            f"/repos/{_repository_path(full_name)}/commits/{urlparse.quote(ref, safe='')}/status?per_page=100",
-            token=token,
-        )
+        statuses = []
+        page = 1
+        combined = {}
+        while True:
+            response = self._request(
+                "GET",
+                f"/repos/{_repository_path(full_name)}/commits/{urlparse.quote(ref, safe='')}/status?per_page=100&page={page}",
+                token=token,
+            )
+            if page == 1:
+                combined = response
+            items = response.get("statuses", [])
+            statuses.extend(items)
+            if len(items) < 100:
+                return {**combined, "statuses": statuses}
+            page += 1
 
     def create_check_run(
         self,
@@ -493,7 +511,7 @@ class GitHubReviewProcessor:
                 continue
             open_run = self._open_check_run(full_name, head_sha, token)
             if open_run is None and self._ci_state_already_reviewed(
-                repository, pull_request, config.required_ci, token
+                repository, pull_request, config, token
             ):
                 continue
             check_run_id = (
@@ -623,7 +641,7 @@ class GitHubReviewProcessor:
         self,
         repository: dict[str, Any],
         pull_request: dict[str, Any],
-        required_ci: list[str],
+        config: RepositoryConfig,
         token: str,
     ) -> bool:
         head_sha = str(pull_request["head"]["sha"])
@@ -641,8 +659,12 @@ class GitHubReviewProcessor:
         if not row:
             return False
         reviewed = row[0].get("metadata", {}).get("ci_checks", {})
-        current = self._ci_checks(str(repository["full_name"]), head_sha, token)
-        return all(reviewed.get(name) == current.get(name) for name in required_ci)
+        current = self._ci_checks(
+            str(repository["full_name"]), head_sha, token, config.required_ci_apps
+        )
+        return all(
+            reviewed.get(name) == current.get(name) for name in config.required_ci
+        )
 
     def _review_pull_request(
         self,
@@ -660,7 +682,9 @@ class GitHubReviewProcessor:
             config_blob, config = self._load_policy(
                 full_name, str(repository["default_branch"]), token
             )
-            ci_checks = self._ci_checks(full_name, head_sha, token)
+            ci_checks = self._ci_checks(
+                full_name, head_sha, token, config.required_ci_apps
+            )
             waiting = _waiting_required_checks(config.required_ci, ci_checks)
             if waiting and not ci_wait_expired:
                 self._wait_for_ci(
@@ -791,11 +815,32 @@ class GitHubReviewProcessor:
         config_blob = self._load_config_blob(full_name, default_branch, token)
         config_content = _decode_github_content(config_blob)
         try:
-            return config_blob, load_repository_config(config_content)
+            config = load_repository_config(config_content)
         except (TypeError, ValueError) as exc:
             raise RepositoryConfigurationError(
                 f"Invalid `.repomonster.yml`: {exc}"
             ) from exc
+        self._validate_policy(config)
+        return config_blob, config
+
+    def _validate_policy(self, config: RepositoryConfig) -> None:
+        try:
+            self.review_service.repository.load_profile(config.model_profile)
+        except (FileNotFoundError, ValueError) as exc:
+            raise RepositoryConfigurationError(
+                f"The selected model profile is unavailable: {config.model_profile}."
+            ) from exc
+        with self._connect() as connection, connection.cursor() as cursor:
+            for selection in config.selected_packs:
+                pack_id, version = selection.rsplit("@", 1)
+                cursor.execute(
+                    "SELECT 1 FROM standard_pack_versions WHERE pack_id = %s AND version = %s",
+                    (pack_id, version),
+                )
+                if cursor.fetchone() is None:
+                    raise RepositoryConfigurationError(
+                        f"The selected standard pack is not installed: {selection}."
+                    )
 
     def _prepare_review(
         self,
@@ -958,6 +1003,10 @@ class GitHubReviewProcessor:
                 )
             blob = self.client.get_blob(full_name, str(item["sha"]), token)
             content = _decode_github_content(blob)
+            if "\x00" in content:
+                raise RepositoryConfigurationError(
+                    f"Repository knowledge must not contain NUL characters: {path}."
+                )
             stack = config.stacks_for_path(path)
             sources.append(
                 RepositorySource(
@@ -1043,20 +1092,44 @@ class GitHubReviewProcessor:
             for item in files
         ]
 
-    def _ci_checks(self, full_name: str, head_sha: str, token: str) -> dict[str, str]:
+    def _ci_checks(
+        self,
+        full_name: str,
+        head_sha: str,
+        token: str,
+        required_apps: dict[str, int],
+    ) -> dict[str, str]:
         checks: dict[str, str] = {}
+
+        def combine(name: str, state: str) -> None:
+            def caution(value: str) -> int:
+                if value in {"success", "successful", "passed"}:
+                    return 0
+                if value in CI_WAITING_STATES:
+                    return 1
+                return 2
+
+            state = state.lower()
+            if name not in checks or caution(state) > caution(checks[name]):
+                checks[name] = state
+
         for check in self.client.list_check_runs(full_name, head_sha, token):
             name = str(check.get("name") or "")
             if not name or name == CHECK_NAME:
                 continue
-            checks[name] = str(
-                check.get("conclusion") or check.get("status") or "unknown"
+            app_id = (check.get("app") or {}).get("id")
+            if name in required_apps and app_id != required_apps[name]:
+                continue
+            combine(
+                name,
+                str(check.get("conclusion") or check.get("status") or "unknown"),
             )
         status = self.client.combined_status(full_name, head_sha, token)
         for item in status.get("statuses", []):
             context = str(item.get("context") or "")
-            if context:
-                checks[context] = str(item.get("state") or "unknown")
+            # A commit status has no verifiable author, so it cannot satisfy a pinned check.
+            if context and context not in required_apps:
+                combine(context, str(item.get("state") or "unknown"))
         return checks
 
     def _upsert_installation(
@@ -1229,9 +1302,9 @@ def _select_stack(
 
 
 def _github_issue_numbers(text: str, full_name: str) -> list[int]:
-    numbers = [int(value) for value in re.findall(r"(?<![\w])#(\d+)\b", text)]
+    numbers = [int(value) for value in re.findall(r"(?<![\w])#(\d{1,10})\b", text)]
     owner, repository = (re.escape(part) for part in full_name.split("/", 1))
-    url_pattern = rf"https?://github\.com/{owner}/{repository}/issues/(\d+)\b"
+    url_pattern = rf"https?://github\.com/{owner}/{repository}/issues/(\d{{1,10}})\b"
     numbers.extend(
         int(value) for value in re.findall(url_pattern, text, flags=re.IGNORECASE)
     )

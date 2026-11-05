@@ -56,9 +56,17 @@ class ReviewService:
                 insight_result = self.insight_provider.generate(llm_review_brief)
                 findings.extend(insight_result.findings)
             except Exception as exc:
+                # Deterministic errors block with or without the model's opinion.
+                blocked = any(item.severity == Severity.ERROR for item in findings)
                 return ReviewResult(
-                    gate_state=GateState.MANUAL_ESCALATION,
-                    summary="manual_escalation: insight endpoint failed; no automated decision was made.",
+                    gate_state=(
+                        GateState.BLOCKED if blocked else GateState.MANUAL_ESCALATION
+                    ),
+                    summary=(
+                        "blocked: deterministic errors were found; the insight endpoint failed."
+                        if blocked
+                        else "manual_escalation: insight endpoint failed; no automated decision was made."
+                    ),
                     findings=findings
                     + [
                         Finding(
