@@ -145,7 +145,7 @@ def create_app() -> Any:
                 status_code=503, detail="Direct review endpoint is disabled"
             )
         expected = f"Bearer {api_key}"
-        if not hmac.compare_digest(expected, authorization):
+        if not hmac.compare_digest(expected.encode(), authorization.encode()):
             raise HTTPException(status_code=401, detail="Invalid API credentials")
         try:
             payload = json.loads(await http_request.body())
@@ -158,7 +158,9 @@ def create_app() -> Any:
         result = await run_in_threadpool(
             service.review, ReviewRequest.from_dict(payload)
         )
-        return result.to_dict()
+        response = result.to_dict()
+        response.pop("llm_review_brief", None)
+        return response
 
     @app.post("/webhooks/github", status_code=202)
     async def github_webhook(

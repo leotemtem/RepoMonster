@@ -207,6 +207,7 @@ class PostgresStandardsRepository:
                         OR (%s::text IS NOT NULL AND lower(d.framework) = %s::text)
                   )
                   AND c.embedding IS NOT NULL
+                  AND c.embedding_model = %s
             )
             SELECT
                 id, scope, language, framework, title, tags, source_urls, content,
@@ -233,6 +234,7 @@ class PostgresStandardsRepository:
                         language,
                         framework,
                         framework,
+                        self.embedding_provider.model_id,
                         vector_literal,
                         vector_literal,
                         limit,

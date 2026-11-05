@@ -63,9 +63,14 @@ The worker:
 
 Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. A job that uses up its attempts, including one that keeps killing its worker, is not run again. It stays claimable until an `action_required` Check Run is published, because GitHub treats `neutral` as passing for required checks. Workers survive database outages and retry their queue operations. Each claim takes a lock token that every later queue write must present, and a heartbeat keeps the lock fresh while the worker is alive, so a worker that lost its lock cannot overwrite newer results. A database constraint allows one running job per repository, which keeps reviews and policy syncs in order. Embedding calls run outside database transactions. A retry that finds its Check Run already completed does not review again.
 
+On a termination signal, the worker checks for shutdown before source embeddings,
+retrieval embeddings, and the insight call. Work stopped at these boundaries returns
+to pending immediately without consuming an attempt. An insight call already in
+progress finishes, including persistence and publication.
+
 ### Bootstrap
 
-Bootstrap applies ordered SQL migrations under a PostgreSQL advisory lock, verifies configured embedding dimensions, and imports changed standard packs. Migrations and content synchronization are deliberately separate concepts even though `repomonster bootstrap` runs both.
+Bootstrap applies ordered SQL migrations under a PostgreSQL advisory lock, verifies configured embedding dimensions, and imports changed standard packs. Migrations and content synchronization are deliberately separate concepts even though `repomonster bootstrap` runs both. Bootstrap reports a dimension mismatch as requiring database recreation or reindexing, and rejects missing applied migration files before applying changes.
 
 ### PostgreSQL and pgvector
 
@@ -108,7 +113,7 @@ Deployment environment variables, profiles, bundled packs, provider credentials,
 
 `.repomonster.yml` and referenced knowledge files are loaded from the repository's default branch through the GitHub installation token. PR-head changes cannot alter policy for the review currently being evaluated.
 
-Repository configuration may select known profiles and packs but cannot define model endpoints, credentials, or files outside the repository.
+Repository configuration may select known profiles and packs but cannot define model endpoints, credentials, or files outside the repository. Local repository synchronization also skips knowledge paths that resolve outside the checkout.
 
 Policy parsing validates mapping sections and string list entries before processing. Profile names contain only lowercase letters, digits, underscores, and hyphens; resolved profile files must stay within the operator's profiles directory. Profile availability and all selected pack versions are checked before knowledge synchronization. Invalid YAML, malformed configuration, unavailable profiles or packs, and NUL characters in repository knowledge produce a configuration-specific `action_required` Check Run on the first attempt without consuming retries or exposing database diagnostics.
 
@@ -128,7 +133,7 @@ github:https://github.com:123456789
 
 Mutable owner/repository names remain display metadata. This prevents repository rename or transfer from silently creating a second knowledge namespace.
 
-Installation tokens are requested for the single repository ID that triggered the delivery. Tokens are cached in worker memory until close to expiry.
+Installation tokens are requested for the single repository ID that triggered the delivery. Tokens request only checks write access and contents, issues, metadata, pull requests, and statuses read access. They are cached in worker memory until close to expiry; expired cache entries are removed when requesting a token. Disabled repositories and installations remain disabled during synchronization, and the worker ignores their deliveries.
 
 ## Knowledge model
 
@@ -143,7 +148,7 @@ Knowledge is layered:
 
 `standard_documents` stores identity, provenance, scope, source text, checksums, and enabled state. `standard_chunks` stores retrieval-sized text and embeddings. `standard_rules` stores structured rules authored by standard packs.
 
-Repository source versions use provider blob SHA. A changed blob creates a new document version and disables its predecessor. Unchanged content with the same embedding model and dimensions reuses existing chunks.
+Repository source versions use provider blob SHA. A changed blob creates a new document version and disables its predecessor. Unchanged content with the same embedding model and dimensions reuses existing chunks. A partial unique index permits only one enabled version of each repository or task logical document; public pack versions remain independently selectable.
 
 ## Retrieval
 
@@ -151,7 +156,7 @@ For each review, RepoMonster:
 
 1. builds a semantic query from title, description, language, framework, and changed paths
 2. iterates profile retrieval scopes in precedence order
-3. filters documents by scope, repository/tenant/task identity, selected pack version, language, framework, and enabled state
+3. filters documents by scope, repository/tenant/task identity, selected pack version, language, framework, enabled state, and current embedding model
 4. ranks eligible chunks by cosine distance
 5. loads structured rules for selected documents
 6. constructs a bounded review brief
@@ -165,7 +170,13 @@ The default precedence is:
 
 SQL metadata filtering happens before pgvector ranking. Similar content from another repository cannot cross the repository-key predicate.
 
-Changed-file patches are transient evidence. GitHub-provided patch excerpts are bounded per file, and the model brief imposes an additional total diff-character limit. Diffs are not stored as permanent public-standard content.
+Changed-file patches are transient evidence. GitHub-provided patch excerpts are bounded per file, and the model brief imposes an additional total diff-character limit. Stored review request payloads omit diff excerpts. The bounded model brief can still contain diff evidence and is retained with its review run; diffs are not stored as permanent public-standard content. Webhook payloads and review persistence remove NUL and lone surrogate characters from text before storage.
+
+Operators can run `repomonster prune` to remove terminal webhook deliveries by last
+update time and review runs by creation time after a configurable retention period
+(`--days`, otherwise `RETENTION_DAYS`, default 90). Findings are deleted with their
+review runs. Pending and processing deliveries are preserved. Pruning requires an
+operator schedule; knowledge document history has no automatic retention.
 
 ## Review engine
 
@@ -202,6 +213,12 @@ else
 After that base decision, an optional composite auto-block policy can upgrade a non-blocked result to `blocked`. The policy requires all configured conditions: a deterministic poor-PR-documentation signal, a model recommendation of `request_changes` or `block`, and at least one evidence-backed model warning or error at or above the configured impact threshold. `shadow` mode appends an informational audit finding without changing the base decision; `enforce` mode applies the upgrade. Raw warning counts and model recommendations by themselves are insufficient.
 
 An insight exception returns `blocked` if deterministic errors exist, and `manual_escalation` otherwise, with the deterministic findings preserved. It does not fall through to a successful deterministic-only decision when an insight endpoint was configured but failed.
+
+Check Run findings escape untrusted Markdown and HTML. Summaries are generated by
+the service. Terminal failures publish stable error codes with a direction to inspect
+worker logs; full diagnostics stay in queue error records and logs. Insight failures
+publish only their exception type. The direct API omits the model brief. Model
+responses must have `finish_reason: stop` before their findings are accepted.
 
 ## Provider boundary
 

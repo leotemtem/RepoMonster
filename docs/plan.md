@@ -59,7 +59,7 @@ From the security and data-integrity audit of 2026-11-05. Finish H1 to H3 before
 - [x] **H3 Concurrency.** Fenced job ownership, per-pull-request serialization, ordered policy syncs, and no HTTP calls inside database transactions.
 - [x] **H4 Model input.** Per-scope retrieval quotas, untrusted text clearly separated in the brief, explicit truncation, and filtered vector search that cannot silently return nothing.
 - [x] **H5 Resource limits.** Bounded request bodies, non-blocking routes, database timeouts, caps on embedding work, delivery coalescing, and safer YAML parsing.
-- [ ] **H6 Hardening.** Stable error codes in Check Runs, retention limits, schema constraints, least-privilege database roles, and Compose hardening. Fix the embedding-dimension migration path before item 2.4.
+- [x] **H6 Hardening.** Stable error codes and plain-text findings in Check Runs, retention maintenance, storage validation, schema constraints, scoped tokens, cooperative shutdown, and Compose hardening. Embedding-dimension migration checks report the required database transition. Separate database roles remain in item 1.4.
 
 ## Phase 1: AWS service (Terraform)
 

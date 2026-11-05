@@ -6,12 +6,18 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from .database import sanitize_storage
+
 if TYPE_CHECKING:
     from psycopg_pool import ConnectionPool
 
 
 class LostJobLock(RuntimeError):
     """Another worker now owns this job, so this worker must stop working on it."""
+
+
+class WorkerStopping(RuntimeError):
+    """Return an unfinished job for the next worker without spending an attempt."""
 
 
 @dataclass(slots=True)
@@ -56,6 +62,7 @@ class WebhookQueue:
         payload: dict[str, Any],
         delay_seconds: int = 0,
     ) -> bool:
+        payload = sanitize_storage(payload)
         with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -195,6 +202,13 @@ class WebhookQueue:
             "ignored" if ignored else "completed",
         )
 
+    def release(self, job: WebhookJob) -> bool:
+        return self._update_owned(
+            job,
+            """status = 'pending', available_at = now(), attempts = attempts - 1,
+               locked_at = NULL, lock_token = NULL""",
+        )
+
     def fail(self, job: WebhookJob, error: Exception) -> bool:
         """Record a failure and return True when no retries remain.
 
@@ -209,7 +223,7 @@ class WebhookQueue:
                     available_at = now() + make_interval(secs => %s),
                     locked_at = NULL, lock_token = NULL, last_error = %s""",
             delay,
-            f"{type(error).__name__}: {error}"[:4000],
+            sanitize_storage(f"{type(error).__name__}: {error}")[:4000],
         )
         return exhausted
 

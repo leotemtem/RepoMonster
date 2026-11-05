@@ -3,9 +3,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
@@ -16,8 +18,9 @@ from urllib import parse as urlparse
 import httpx
 
 from .config import RepositoryConfig, load_repository_config
+from .database import sanitize_storage
 from .http import HTTPClient, retry_after_seconds
-from .jobs import WebhookJob, WebhookQueue
+from .jobs import WebhookJob, WebhookQueue, WorkerStopping
 from .knowledge import (
     RepositoryKnowledgeSynchronizer,
     RepositorySource,
@@ -133,7 +136,7 @@ def verify_webhook_signature(body: bytes, secret: str, signature: str | None) ->
     if not secret or not signature or not signature.startswith("sha256="):
         return False
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())
 
 
 def should_queue_event(event: str, payload: dict[str, Any], app_id: str) -> bool:
@@ -159,15 +162,30 @@ class GitHubClient:
 
     def installation_token(self, installation_id: int, repository_id: int) -> str:
         cache_key = (installation_id, repository_id)
-        cached = self._installation_tokens.get(cache_key)
         now = datetime.now(UTC)
-        if cached and cached[1] > now + timedelta(minutes=2):
+        self._installation_tokens = {
+            key: value
+            for key, value in self._installation_tokens.items()
+            if value[1] > now + timedelta(minutes=2)
+        }
+        cached = self._installation_tokens.get(cache_key)
+        if cached:
             return cached[0]
         response = self._request(
             "POST",
             f"/app/installations/{installation_id}/access_tokens",
             token=self._app_jwt(),
-            payload={"repository_ids": [repository_id]},
+            payload={
+                "repository_ids": [repository_id],
+                "permissions": {
+                    "checks": "write",
+                    "contents": "read",
+                    "issues": "read",
+                    "metadata": "read",
+                    "pull_requests": "read",
+                    "statuses": "read",
+                },
+            },
             retry_post=True,
         )
         token = str(response["token"])
@@ -434,15 +452,49 @@ class GitHubReviewProcessor:
         client: GitHubClient,
         embedding_provider: EmbeddingProvider,
         review_service: ReviewService,
+        stop: threading.Event | None = None,
     ) -> None:
         self.pool = pool
         self.queue = queue
         self.client = client
         self.embedding_provider = embedding_provider
         self.review_service = review_service
+        self.stop = stop
+
+    def _check_stopping(self) -> None:
+        if self.stop is not None and self.stop.is_set():
+            raise WorkerStopping()
 
     def process(self, job: WebhookJob) -> bool:
         """Process one delivery. Returns False when the event is intentionally ignored."""
+        self._check_stopping()
+        identity = job.payload.get("repository") or {}
+        installation = job.payload.get("installation") or {}
+        with self.pool.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM repositories WHERE provider = 'github'
+                    AND provider_base_url = %s AND external_id = %s AND NOT enabled
+                ) OR EXISTS (
+                    SELECT 1 FROM provider_installations WHERE provider = 'github'
+                    AND provider_base_url = %s AND external_installation_id = %s AND NOT enabled
+                )
+                """,
+                (
+                    (
+                        _repository_origin(identity)
+                        if identity.get("html_url")
+                        else _provider_origin_from_api(self.client.settings.api_url)
+                    ),
+                    str(identity.get("id", "")),
+                    _provider_origin_from_api(self.client.settings.api_url),
+                    str(installation.get("id", "")),
+                ),
+            )
+            disabled = cursor.fetchone()
+            if disabled and disabled[0]:
+                return False
         if job.event_name == "pull_request":
             return self._process_pull_request_delivery(job)
         if job.event_name in CI_EVENTS:
@@ -783,6 +835,7 @@ class GitHubReviewProcessor:
             )
             return True
 
+        self._check_stopping()
         if waiting:
             result = self.review_service.escalate(
                 review_request,
@@ -798,7 +851,11 @@ class GitHubReviewProcessor:
                 ],
             )
         else:
-            result = self.review_service.review(review_request, profile_id=profile_id)
+            result = self.review_service.review(
+                review_request,
+                profile_id=profile_id,
+                before_expensive_step=self._check_stopping,
+            )
         self.queue.verify_lock(job)
         self._persist_result(review_request, result)
         self._conclude(
@@ -831,6 +888,7 @@ class GitHubReviewProcessor:
                 "repository": {
                     "id": repository["id"],
                     "full_name": repository["full_name"],
+                    "html_url": repository.get("html_url"),
                 },
                 "installation": {"id": installation_id},
                 "number": pull_request["number"],
@@ -881,7 +939,7 @@ class GitHubReviewProcessor:
                 conclusion="action_required",
                 title="RepoMonster could not complete the review",
                 summary="The review failed after all retry attempts. Maintainer review is required.",
-                text=error[:4000],
+                text=f"Error code: {_terminal_error_code(error)}. Check the worker logs for details.",
             )
         except GitHubAPIError as exc:
             # The repository, commit or installation is gone, so retrying cannot help.
@@ -966,11 +1024,12 @@ class GitHubReviewProcessor:
             stale = RepositoryKnowledgeSynchronizer(
                 connection, self.embedding_provider
             ).stale_chunks(repository_key, synced_sources)
-        vectors = {
-            document_id: self.embedding_provider.embed(chunks)
-            for document_id, chunks in stale.items()
-        }
+        vectors = {}
+        for document_id, chunks in stale.items():
+            self._check_stopping()
+            vectors[document_id] = self.embedding_provider.embed(chunks)
 
+        self._check_stopping()
         self.queue.verify_lock(job)
         with self.pool.connection() as connection:
             installation_db_id = self._upsert_installation(
@@ -1147,13 +1206,17 @@ class GitHubReviewProcessor:
             references.append(TaskReference(kind="github_issue", value=task_key))
             if len(sources) >= MAX_EMBEDDED_ISSUES:
                 continue
-            content = f"# {issue.get('title') or f'Issue #{number}'}\n\n{issue.get('body') or ''}"
+            content = sanitize_storage(
+                f"# {issue.get('title') or f'Issue #{number}'}\n\n{issue.get('body') or ''}"
+            )
             sources.append(
                 (
                     task_key,
                     RepositorySource(
                         path=f"issues/{number}.md",
-                        title=f"GitHub issue #{number}: {issue.get('title') or ''}",
+                        title=sanitize_storage(
+                            f"GitHub issue #{number}: {issue.get('title') or ''}"
+                        ),
                         content=content,
                         source_sha=str(
                             issue.get("updated_at") or issue.get("id") or number
@@ -1245,7 +1308,7 @@ class GitHubReviewProcessor:
                     namespace, auth_reference, webhook_secret_reference
                 ) VALUES ('github', %s, %s, %s, %s, %s)
                 ON CONFLICT (provider, provider_base_url, external_installation_id)
-                DO UPDATE SET namespace = EXCLUDED.namespace, enabled = true, updated_at = now()
+                DO UPDATE SET namespace = EXCLUDED.namespace, updated_at = now()
                 RETURNING id
                 """,
                 (
@@ -1259,10 +1322,13 @@ class GitHubReviewProcessor:
             return int(cursor.fetchone()[0])
 
     def _persist_result(self, request: ReviewRequest, result) -> None:
+        payload = sanitize_storage(request.to_dict())
+        for changed_file in payload.get("changed_files", []):
+            changed_file.pop("diff_excerpt", None)
         with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id FROM repositories WHERE repository_key = %s",
-                (request.resolved_repository_key(),),
+                (sanitize_storage(request.resolved_repository_key()),),
             )
             repository_row = cursor.fetchone()
             cursor.execute(
@@ -1281,22 +1347,24 @@ class GitHubReviewProcessor:
                               insight_recommendation_reason = EXCLUDED.insight_recommendation_reason
                 RETURNING id
                 """,
-                (
-                    int(repository_row[0]) if repository_row else None,
-                    request.provider.value,
-                    request.resolved_repository_key(),
-                    request.external_id,
-                    request.metadata.get("head_sha"),
-                    result.applied_profile,
-                    result.gate_state.value,
-                    json.dumps(request.to_dict()),
-                    result.llm_review_brief,
+                sanitize_storage(
                     (
-                        result.insight_recommendation.value
-                        if result.insight_recommendation is not None
-                        else None
-                    ),
-                    result.insight_recommendation_reason or None,
+                        int(repository_row[0]) if repository_row else None,
+                        request.provider.value,
+                        request.resolved_repository_key(),
+                        request.external_id,
+                        request.metadata.get("head_sha"),
+                        result.applied_profile,
+                        result.gate_state.value,
+                        json.dumps(payload),
+                        _without_diff_evidence(result.llm_review_brief),
+                        (
+                            result.insight_recommendation.value
+                            if result.insight_recommendation is not None
+                            else None
+                        ),
+                        result.insight_recommendation_reason or None,
+                    )
                 ),
             )
             row = cast(tuple[int], cursor.fetchone())
@@ -1312,15 +1380,17 @@ class GitHubReviewProcessor:
                         evidence
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                     """,
-                    (
-                        run_id,
-                        finding.severity.value,
-                        finding.impact.value,
-                        finding.rule_id,
-                        finding.category,
-                        finding.title,
-                        finding.detail,
-                        json.dumps(finding.evidence),
+                    sanitize_storage(
+                        (
+                            run_id,
+                            finding.severity.value,
+                            finding.impact.value,
+                            finding.rule_id,
+                            finding.category,
+                            finding.title,
+                            finding.detail,
+                            json.dumps(sanitize_storage(finding.evidence)),
+                        )
                     ),
                 )
 
@@ -1476,6 +1546,49 @@ def _check_title(state: GateState) -> str:
     }[state]
 
 
+def _without_diff_evidence(brief: str) -> str:
+    """Drop patches from the stored brief, because they can contain secrets."""
+    return re.sub(
+        r"(<<<UNTRUSTED ([0-9a-f]+) DIFF [^\n]*>>>\n).*?(\n<<<END UNTRUSTED \2>>>)",
+        r"\1[diff not stored]\3",
+        brief,
+        flags=re.DOTALL,
+    )
+
+
+def _terminal_error_code(error: str) -> str:
+    error_type = error.split(":", 1)[0]
+    if error_type == "GitHubAPIError":
+        return "github_api_error"
+    if error_type == "InsightResponseError":
+        return "model_error"
+    if error_type == "HTTPResponseError":
+        return "embedding_error"
+    # Queue errors retain their type name, while diagnostics stay in worker logs.
+    try:
+        import psycopg
+        import psycopg_pool
+
+        candidate = getattr(psycopg.errors, error_type, None) or getattr(
+            psycopg_pool, error_type, None
+        )
+        if isinstance(candidate, type) and issubclass(candidate, psycopg.Error):
+            return "database_error"
+    except ImportError:  # pragma: no cover
+        pass
+    return "internal_error"
+
+
+def _escape_markdown(value: str) -> str:
+    # Escape markup punctuation and flatten line breaks in untrusted fields.
+    value = html.escape(sanitize_storage(value), quote=False)
+    return (
+        re.sub(r"([\\`*_{}\[\]()#+\-.!|>~:/@])", r"\\\1", value)
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+
 def _format_findings(result) -> str:
     if not result.findings:
         return "No findings."
@@ -1486,10 +1599,15 @@ def _format_findings(result) -> str:
             if finding.impact != FindingImpact.ADVISORY
             else ""
         )
-        lines.append(f"### {finding.severity.value.upper()}{impact}: {finding.title}")
-        lines.append(finding.detail)
+        lines.append(
+            f"### {finding.severity.value.upper()}{impact}: {_escape_markdown(finding.title)}"
+        )
+        lines.append(_escape_markdown(finding.detail))
         if finding.evidence:
-            lines.append("Evidence: " + ", ".join(finding.evidence[:10]))
+            lines.append(
+                "Evidence: "
+                + ", ".join(_escape_markdown(item) for item in finding.evidence[:10])
+            )
         lines.append("")
     return "\n".join(lines)
 

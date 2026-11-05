@@ -153,6 +153,10 @@ class OpenAICompatibleInsightProvider:
         ) as response:
             body = json.loads(response.read())
         try:
+            if body["choices"][0].get("finish_reason") != "stop":
+                raise InsightResponseError(
+                    "Insight endpoint did not complete the final response"
+                )
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise InsightResponseError(

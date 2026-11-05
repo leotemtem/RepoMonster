@@ -9,11 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Operator-controlled retention maintenance with `repomonster prune`, configurable
+  through `--days` or `RETENTION_DAYS` (default 90).
+
 - Open-source project governance: `LICENSE` (MIT), `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue templates, and a protected `main`
   branch ruleset.
 
 ### Changed
+
+- Check Runs publish stable processing error codes and display finding text safely;
+  full diagnostics stay in operator records. Direct review responses omit model briefs.
+- Review request storage omits diff excerpts and normalizes text for PostgreSQL.
+  Retrieval uses only the active embedding model, and repository/task documents
+  have a single enabled version. Migration checks identify dimension mismatches
+  and missing applied files.
+- Worker shutdown returns unfinished work before model calls without spending an
+  attempt. Installation tokens use explicit permissions, disabled identities stay
+  disabled, and model responses require a completed final answer.
+- Application containers use read-only filesystems, restricted capabilities, and
+  configurable memory limits.
 
 - API and worker database components share one bounded, health-checked connection
   pool per process and one review-service factory. Added configurable pool sizes,
