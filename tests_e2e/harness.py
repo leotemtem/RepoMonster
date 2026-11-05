@@ -124,6 +124,7 @@ class FakeGitHub:
         self.external_checks: dict[str, list[dict[str, Any]]] = {}
         self.statuses: dict[str, list[dict[str, Any]]] = {}
         self.check_runs: list[dict[str, Any]] = []
+        self.model_calls = 0
         self.add_pull_request()
 
         fake = self
@@ -216,6 +217,10 @@ class FakeGitHub:
         try:
             if method == "POST" and parsed.path == "/embeddings":
                 status, body = 200, self._embeddings(payload)
+            elif method == "POST" and parsed.path == "/chat/completions":
+                with self.lock:
+                    self.model_calls += 1
+                status, body = 500, {"message": "model unavailable"}
             else:
                 with self.lock:
                     self.requests.append((method, handler.path))
@@ -298,6 +303,9 @@ class FakeGitHub:
                 return self._update_check_run(int(match[1]), payload or {})
         if method != "GET":
             return 404, {"message": "Not Found"}
+        if route == "/pulls":
+            page = int(query.get("page", ["1"])[0])
+            return 200, list(self.pulls.values()) if page == 1 else []
         if match := re.fullmatch(r"/pulls/(\d+)", route):
             pull = self.pulls.get(int(match[1]))
             return (200, pull) if pull else (404, {"message": "Not Found"})
@@ -333,6 +341,8 @@ class FakeGitHub:
             with self.lock:
                 own = [
                     {
+                        "id": run["id"],
+                        "app": {"id": int(APP_ID)},
                         "name": run["name"],
                         "status": run["status"],
                         "conclusion": run["conclusion"],
@@ -531,6 +541,9 @@ def service_environment(
 class EndToEndTestCase(unittest.TestCase):
     """Runs the API and one worker against a fresh database and a fake GitHub."""
 
+    settings: dict[str, str] = {}
+    use_model = False
+
     @classmethod
     def setUpClass(cls) -> None:
         POSTGRES.start()
@@ -550,6 +563,10 @@ class EndToEndTestCase(unittest.TestCase):
         self.environment = service_environment(
             self.database_url, self.github.url, key_path
         )
+        self.environment.update(self.settings)
+        if self.use_model:
+            self.environment["INSIGHT_BASE_URL"] = self.github.url
+            self.environment["INSIGHT_MODEL"] = "e2e-model"
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
 
         self.api_port = _free_port()
@@ -635,6 +652,30 @@ class EndToEndTestCase(unittest.TestCase):
             "action": action,
             "number": number,
             "pull_request": self.github.pulls[number],
+            "repository": {
+                "id": REPOSITORY_ID,
+                "full_name": FULL_NAME,
+                "html_url": f"https://github.com/{FULL_NAME}",
+            },
+            "installation": {"id": INSTALLATION_ID},
+        }
+
+    def check_run_event(
+        self,
+        name: str,
+        *,
+        pull_numbers: tuple[int, ...] = (),
+        app_id: int = 999,
+    ) -> dict[str, Any]:
+        return {
+            "action": "completed",
+            "check_run": {
+                "name": name,
+                "head_sha": HEAD_SHA,
+                "status": "completed",
+                "app": {"id": app_id},
+                "pull_requests": [{"number": number} for number in pull_numbers],
+            },
             "repository": {
                 "id": REPOSITORY_ID,
                 "full_name": FULL_NAME,

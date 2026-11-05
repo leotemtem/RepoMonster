@@ -137,7 +137,7 @@ The default profile applies these outcomes after deterministic and model finding
 | Ready for human review | no errors and at most one warning | `success` |
 | Needs author updates | warnings exceed the profile tolerance | `action_required` |
 | Blocked | one or more errors, or a matching enforced auto-block policy | `action_required` |
-| Manual escalation | insight endpoint or result processing failed | `neutral` |
+| Manual escalation | insight endpoint or result processing failed, or required CI did not finish in time | `action_required` |
 
 Informational findings never block. The default profile tolerates one warning and evaluates the composite auto-block policy in shadow mode. Shadow mode records when the policy would match but cannot change the gate. Set `checks.auto_block.mode: enforce` only after reviewing shadow results. Profiles are deployment-owned policy files selected by repository configuration.
 

@@ -62,7 +62,7 @@ The worker:
 9. persists the run and findings
 10. completes the Check Run
 
-Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. Terminal failure attempts to publish a neutral Check Run.
+Jobs retry with bounded exponential backoff. A processing job becomes claimable again after the configured lock timeout, allowing recovery after worker termination. Terminal failure attempts to publish an `action_required` Check Run, because GitHub treats `neutral` as passing for required checks.
 
 ### Bootstrap
 
@@ -192,6 +192,8 @@ Provider adapters own:
 - publication
 
 The GitHub adapter implements this boundary for pull requests. Stale deliveries are ignored when their head SHA no longer matches the current PR. Drafts receive a neutral check. Supported actions are opened, reopened, synchronize, edited, and ready-for-review.
+
+While a required check is pending or has not appeared, the Check Run stays `in_progress`, no gate decision is published, and no model call is made. Completed `check_run` and `status` events for a required check re-review the open pull requests on that head SHA, continuing the open Check Run. RepoMonster ignores its own Check Run and skips a re-review if the required check results have not changed. A delayed queue job keyed to the Check Run ends the wait in `manual_escalation` after `CI_WAIT_TIMEOUT_SECONDS`.
 
 GitLab event normalization exists for the provider-independent shape, but the HTTP GitLab route does not yet verify secrets, enqueue jobs, fetch merge requests, or publish results. It must not be described as a complete production provider.
 

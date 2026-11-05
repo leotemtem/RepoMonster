@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pull requests whose required CI is still running or has not started now wait
+  instead of being blocked, and are re-reviewed when the checks finish. The wait
+  ends in `manual_escalation` after `CI_WAIT_TIMEOUT_SECONDS`. GitHub Apps must
+  subscribe to the check run and status events.
+- `manual_escalation` and terminal review failures now publish `action_required`,
+  because GitHub treats `neutral` as passing for required checks.
 - GitHub webhooks no longer fail with a 422: FastAPI treated the `request`
   argument as a required query parameter, so no delivery reached verification.
 

@@ -31,9 +31,9 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 ## Phase 0: streamline
 
 - [x] **0.0 End-to-end harness.** `tests_e2e/` runs the real API and worker against real PostgreSQL with pgvector and a fake GitHub that enforces App JWTs and scoped tokens. Fixes the webhook routes, which rejected every delivery with a 422 because `Request` was `Any` at runtime.
-- [ ] **0.1 Fix the CI-timing bug (F1).** Pending CI states (`queued`, `in_progress`, `pending`, `requested`, `waiting`) and required checks that have not appeared yet become a "waiting" state: the Check Run stays `in_progress` with a summary naming the pending checks, no gate decision is published, and no model call is made. A required check still missing after a configurable wait ends in `manual_escalation`, naming the check. Queue `check_suite` and `check_run` (`completed`) and `status` events, ignoring RepoMonster's own Check Runs by app ID so a review cannot re-trigger itself. Map each event to its open PRs by head SHA and re-review once, reusing the open Check Run for that SHA. Subscribe the GitHub App to those events and document it in `docs/operations.md`.
+- [x] **0.1 Fix the CI-timing bug (F1).** Pending CI states (`queued`, `in_progress`, `pending`, `requested`, `waiting`) and required checks that have not appeared yet become a "waiting" state: the Check Run stays `in_progress` with a summary naming the pending checks, no gate decision is published, and no model call is made. A required check still missing after a configurable wait ends in `manual_escalation`, naming the check. Queue `check_run` (`completed`) and `status` events, ignoring RepoMonster's own Check Runs by app ID so a review cannot re-trigger itself. Map each event to its open PRs by head SHA and re-review once, reusing the open Check Run for that SHA. Subscribe the GitHub App to those events and document it in `docs/operations.md`.
     - Done when: end-to-end tests cover pending to success, pending to failure, a missing check timing out, RepoMonster's own Check Run not re-triggering a review, and several checks completing without repeated reviews.
-- [ ] **0.1a Fail closed on escalation.** `manual_escalation` and terminal review failures publish `action_required` instead of `neutral`, which GitHub treats as passing for required checks.
+- [x] **0.1a Fail closed on escalation.** `manual_escalation` and terminal review failures publish `action_required` instead of `neutral`, which GitHub treats as passing for required checks.
     - Done when: end-to-end tests cover a model failure and exhausted retries.
 - [x] **0.2 Pin tooling (F3, F12, F13).** Add a `dev` extra with pinned ruff, mypy, types-PyYAML and Bandit. Add `[tool.ruff]` with an explicit rule set, run `ruff check --fix`, fix the remainder. Raise `requires-python` to `>=3.12`. Merge the format, ruff and mypy CI jobs into one.
     - Done when: CI is green with pinned versions and no unpinned `pip install` remains in `ci.yml`.
@@ -44,6 +44,17 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 - [ ] **0.7 Split `github.py` (F10).** `github/client.py` (API and auth), `github/processor.py` (job handling), `github/publish.py` (Check Run text). No behaviour change; existing tests move with the code.
 - [ ] **0.8 Knowledge cache (F2).** Skip the tree walk and resync when the default-branch tree SHA matches the last sync. Queue default-branch `push` events to refresh knowledge.
 - [ ] **0.9 Naming (F11).** Rename the package `review_gatekeeper` to `repomonster`, keep one CLI (`repomonster`, with `review-gate` becoming a subcommand), one liveness route (`/healthz`), and the FastAPI title "RepoMonster". Note the rename in `CHANGELOG.md`.
+
+## Phase 0.5: hardening
+
+From the security and data-integrity audit of 2026-11-05. Finish H1 to H3 before Phase 1: autoscaled workers depend on H3. Work H4 to H6 before Phase 1 as well, keeping H3's transaction change ahead of item 0.6.
+
+- [ ] **H1 Gate integrity.** Stricter required-check evidence, permanent errors classified without retries, deterministic errors preserved when the model fails, repository configuration faults reported to the author, profile selection validated, and file classification tightened.
+- [ ] **H2 Queue recovery.** A longer retry schedule, attempt limits enforced on reclaim, terminal failures published durably, workers that survive database restarts, and no repeated side effects after a crash.
+- [ ] **H3 Concurrency.** Fenced job ownership, per-pull-request serialization, ordered policy syncs, and no HTTP calls inside database transactions.
+- [ ] **H4 Model input.** Per-scope retrieval quotas, untrusted text clearly separated in the brief, explicit truncation, and filtered vector search that cannot silently return nothing.
+- [ ] **H5 Resource limits.** Bounded request bodies, non-blocking routes, database timeouts, caps on embedding work, delivery coalescing, and safer YAML parsing.
+- [ ] **H6 Hardening.** Stable error codes in Check Runs, retention limits, schema constraints, least-privilege database roles, and Compose hardening. Fix the embedding-dimension migration path before item 2.4.
 
 ## Phase 1: AWS service (Terraform)
 

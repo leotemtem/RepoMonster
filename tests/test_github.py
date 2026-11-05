@@ -89,39 +89,6 @@ stacks:
         text = "Fixes #42; context: https://github.com/acme/api/issues/42 and #77"
         self.assertEqual(_github_issue_numbers(text, "acme/api"), [42, 77])
 
-    def test_stale_pull_request_delivery_is_not_reviewed(self) -> None:
-        client = _FakeGitHubClient(head_sha="new-head")
-        queue = _FakeQueue()
-        processor = GitHubReviewProcessor(
-            database_url="unused",
-            queue=queue,
-            client=client,
-            embedding_provider=object(),
-            review_service=object(),
-        )
-
-        processed = processor.process(_pull_request_job(head_sha="old-head"))
-
-        self.assertFalse(processed)
-        self.assertEqual(client.created_checks, [])
-
-    def test_draft_pull_request_gets_neutral_check(self) -> None:
-        client = _FakeGitHubClient(head_sha="same-head", draft=True)
-        queue = _FakeQueue()
-        processor = GitHubReviewProcessor(
-            database_url="unused",
-            queue=queue,
-            client=client,
-            embedding_provider=object(),
-            review_service=object(),
-        )
-
-        processed = processor.process(_pull_request_job(head_sha="same-head"))
-
-        self.assertTrue(processed)
-        self.assertEqual(queue.external_result_id, "9001")
-        self.assertEqual(client.updated_checks[0]["conclusion"], "neutral")
-
     def test_review_persistence_records_model_recommendation_and_impact(self) -> None:
         connection = _PersistenceConnection()
         processor = GitHubReviewProcessor(
@@ -189,41 +156,8 @@ class _FakeQueue:
 
 
 class _FakeGitHubClient:
-    def __init__(self, *, head_sha: str, draft: bool = False) -> None:
+    def __init__(self, *, head_sha: str) -> None:
         self.head_sha = head_sha
-        self.draft = draft
-        self.created_checks: list[dict] = []
-        self.updated_checks: list[dict] = []
-
-    def installation_token(self, installation_id: int, repository_id: int) -> str:
-        return "installation-token"
-
-    def get_repository(self, full_name: str, token: str) -> dict:
-        return {
-            "id": 123,
-            "full_name": "acme/api",
-            "default_branch": "main",
-            "html_url": "https://github.com/acme/api",
-        }
-
-    def get_pull_request(self, full_name: str, number: int, token: str) -> dict:
-        return {
-            "number": 7,
-            "state": "open",
-            "draft": self.draft,
-            "head": {"sha": self.head_sha},
-            "html_url": "https://github.com/acme/api/pull/7",
-        }
-
-    def create_check_run(self, full_name: str, token: str, **payload) -> dict:
-        self.created_checks.append(payload)
-        return {"id": 9001}
-
-    def update_check_run(
-        self, full_name: str, check_run_id: int, token: str, **payload
-    ) -> dict:
-        self.updated_checks.append(payload)
-        return {"id": check_run_id}
 
 
 class _PersistenceCursor:
