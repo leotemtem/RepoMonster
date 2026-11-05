@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from review_gatekeeper.packs import chunk_markdown, discover_packs
+from repomonster.packs import chunk_markdown, discover_packs
 
 
 class StandardPackTests(unittest.TestCase):

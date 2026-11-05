@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from review_gatekeeper.models import (
+from repomonster.models import (
     Finding,
     FindingImpact,
     InsightRecommendation,
@@ -11,7 +11,7 @@ from review_gatekeeper.models import (
     ReviewRequest,
     Severity,
 )
-from review_gatekeeper.service import ReviewService
+from repomonster.service import ReviewService
 
 
 class _Repository:

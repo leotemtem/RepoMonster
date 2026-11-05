@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import httpx
 
-from review_gatekeeper.http import HTTPClient, HTTPResponseError, retry_after_seconds
+from repomonster.http import HTTPClient, HTTPResponseError, retry_after_seconds
 
 
 class HTTPRetryTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class HTTPRetryTests(unittest.TestCase):
                         "httpx.Client.request",
                         side_effect=[self.response(status), self.response(200)],
                     ) as send,
-                    patch("review_gatekeeper.http.time.sleep") as sleep,
+                    patch("repomonster.http.time.sleep") as sleep,
                 ):
                     self.request(method, retry_post=method == "POST")
                     self.assertEqual(send.call_count, 2)
@@ -48,7 +48,7 @@ class HTTPRetryTests(unittest.TestCase):
             with (
                 self.subTest(error=error),
                 patch("httpx.Client.request", side_effect=error("unavailable")) as send,
-                patch("review_gatekeeper.http.time.sleep") as sleep,
+                patch("repomonster.http.time.sleep") as sleep,
             ):
                 with self.assertRaises(error):
                     self.request()
@@ -71,7 +71,7 @@ class HTTPRetryTests(unittest.TestCase):
                 patch(
                     "httpx.Client.request", return_value=self.response(status)
                 ) as send,
-                patch("review_gatekeeper.http.time.sleep") as sleep,
+                patch("repomonster.http.time.sleep") as sleep,
             ):
                 with self.assertRaises(httpx.HTTPStatusError):
                     self.request(method)
@@ -84,7 +84,7 @@ class HTTPRetryTests(unittest.TestCase):
                 "httpx.Client.request",
                 side_effect=[self.response(429, "3"), self.response(200)],
             ),
-            patch("review_gatekeeper.http.time.sleep") as sleep,
+            patch("repomonster.http.time.sleep") as sleep,
         ):
             self.request()
             sleep.assert_called_once_with(3)
@@ -92,7 +92,7 @@ class HTTPRetryTests(unittest.TestCase):
             patch(
                 "httpx.Client.request", return_value=self.response(429, "600")
             ) as send,
-            patch("review_gatekeeper.http.time.sleep") as sleep,
+            patch("repomonster.http.time.sleep") as sleep,
         ):
             with self.assertRaises(httpx.HTTPStatusError):
                 self.request()

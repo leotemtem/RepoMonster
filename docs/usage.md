@@ -8,7 +8,7 @@ RepoMonster can be used in three distinct ways. They share the provider-independ
 |---|---|---|---|
 | GitHub App | automatic pull-request readiness checks | PostgreSQL + pgvector | yes, one Check Run |
 | Direct HTTP API | controlled internal integrations and testing | PostgreSQL + pgvector | no |
-| Local `review-gate` CLI | deterministic policy development and examples | bundled files | no |
+| Local `repomonster review` CLI | deterministic policy development and examples | bundled files | no |
 
 The GitHub App is the primary production workflow.
 
@@ -332,7 +332,7 @@ For production RAG, the supplied `repository_key` must identify a repository alr
 Run a deterministic example without PostgreSQL or model access:
 
 ```bash
-PYTHONPATH=src review-gate examples/review_request.json
+PYTHONPATH=src repomonster review examples/review_request.json
 ```
 
 This mode reads bundled standards directly from disk. It is intended for developing request payloads and deterministic rules, not reproducing production vector retrieval or model output.

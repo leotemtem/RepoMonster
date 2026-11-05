@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import unittest
 from pathlib import Path
 
@@ -17,9 +16,8 @@ class LocalReviewCliIntegrationTests(unittest.TestCase):
 
         completed = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "review_gatekeeper.cli",
+                "repomonster",
+                "review",
                 str(root / "examples" / "review_request.json"),
             ],
             cwd=root,

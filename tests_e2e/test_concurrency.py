@@ -12,7 +12,7 @@ from harness import (
 )
 from psycopg_pool import ConnectionPool
 
-from review_gatekeeper.jobs import LostJobLock, WebhookQueue
+from repomonster.jobs import LostJobLock, WebhookQueue
 
 
 class FrozenWorkerTests(EndToEndTestCase):

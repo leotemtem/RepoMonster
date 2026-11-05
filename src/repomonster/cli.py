@@ -22,7 +22,7 @@ def build_service() -> ReviewService:
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     if not argv:
-        print("Usage: review-gate <review_request.json>", file=sys.stderr)
+        print("Usage: repomonster review <review_request.json>", file=sys.stderr)
         return 2
 
     payload = json.loads(Path(argv[0]).read_text())

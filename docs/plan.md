@@ -48,7 +48,7 @@ uv run --frozen bandit -q -r src
 - [x] **0.6 Connection pool and service factory (F8, F9).** One `psycopg_pool.ConnectionPool` built at startup and injected into the queue, repository and processor. One `build_review_service()` used by both `app.py` and the worker. `/readyz` uses a public repository method.
 - [x] **0.7 Split `github/` (F10).** `github/client.py` (API and auth), `github/processor.py` (job handling), `github/publish.py` (Check Run text). No behaviour change; existing tests move with the code.
 - [x] **0.8 Knowledge cache (F2).** Skip the tree walk and resync when the default-branch tree SHA matches the last sync. Queue default-branch `push` events to refresh knowledge.
-- [ ] **0.9 Naming (F11).** Rename the package `review_gatekeeper` to `repomonster`, keep one CLI (`repomonster`, with `review-gate` becoming a subcommand), one liveness route (`/healthz`), and the FastAPI title "RepoMonster". Note the rename in `CHANGELOG.md`.
+- [x] **0.9 Naming (F11).** Rename the package `review_gatekeeper` to `repomonster`, keep one CLI (`repomonster`, with `review-gate` becoming a subcommand), one liveness route (`/healthz`), and the FastAPI title "RepoMonster". Note the rename in `CHANGELOG.md`.
 
 ## Phase 0.5: hardening
 

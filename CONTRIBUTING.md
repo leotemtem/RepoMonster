@@ -34,7 +34,7 @@ uv sync --frozen --extra db --extra web --extra dev
 The offline local simulation runs without PostgreSQL or a model:
 
 ```bash
-PYTHONPATH=src uv run --frozen review-gate examples/review_request.json
+PYTHONPATH=src uv run --frozen repomonster review examples/review_request.json
 ```
 
 ## Checks your change must pass

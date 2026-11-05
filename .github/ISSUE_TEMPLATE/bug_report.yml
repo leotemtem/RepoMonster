@@ -47,7 +47,7 @@ body:
       options:
         - GitHub App (webhook/worker)
         - Direct HTTP API (POST /review)
-        - Local CLI (review-gate)
+        - Local CLI (repomonster review)
         - Other / not sure
     validations:
       required: true

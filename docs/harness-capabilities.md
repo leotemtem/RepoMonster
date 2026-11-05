@@ -55,7 +55,7 @@ An internal service can submit normalized review requests directly to `POST /rev
 
 ### Policy and prompt evaluation
 
-Use `review-gate` with fixture JSON for fast deterministic evaluation, then use an isolated deployment to compare embedding models, standard-pack wording, review profiles, and insight models against known PR fixtures.
+Use `repomonster review` with fixture JSON for fast deterministic evaluation, then use an isolated deployment to compare embedding models, standard-pack wording, review profiles, and insight models against known PR fixtures.
 
 RepoMonster does not yet include an evaluation runner or scoring dashboard, but its provider-independent request and structured result types make those natural external harness extensions.
 

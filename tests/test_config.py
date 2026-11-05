@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from review_gatekeeper.config import load_repository_config
+from repomonster.config import load_repository_config
 
 
 class RepositoryConfigTests(unittest.TestCase):

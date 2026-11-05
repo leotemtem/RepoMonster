@@ -13,9 +13,9 @@ import psycopg
 from harness import DEFAULT_REQUIRED_CI, EndToEndTestCase
 from psycopg_pool import PoolTimeout
 
-from review_gatekeeper.jobs import WebhookQueue
-from review_gatekeeper.management import _connect, _retry_on_database_error
-from review_gatekeeper.pool import build_connection_pool
+from repomonster.jobs import WebhookQueue
+from repomonster.management import _connect, _retry_on_database_error
+from repomonster.pool import build_connection_pool
 
 
 class ConnectionPoolTests(EndToEndTestCase):

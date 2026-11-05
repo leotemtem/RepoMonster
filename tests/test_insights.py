@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from review_gatekeeper.insights import (
+from repomonster.insights import (
     InsightResponseError,
     OpenAICompatibleInsightProvider,
 )
@@ -54,7 +54,7 @@ class InsightProviderTests(unittest.TestCase):
         ).encode()
 
         with patch(
-            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+            "repomonster.insights.urlrequest.urlopen", return_value=response
         ) as open_url:
             insight = provider.generate("Review this change")
 
@@ -104,7 +104,7 @@ class InsightProviderTests(unittest.TestCase):
         ).encode()
 
         with patch(
-            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
+            "repomonster.insights.urlrequest.urlopen", return_value=response
         ) as open_url:
             provider.generate("Review this change")
 
@@ -129,9 +129,7 @@ class InsightProviderTests(unittest.TestCase):
         ).encode()
 
         with (
-            patch(
-                "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
-            ),
+            patch("repomonster.insights.urlrequest.urlopen", return_value=response),
             self.assertRaisesRegex(
                 InsightResponseError, "reasoning but no valid structured final answer"
             ),
@@ -171,9 +169,7 @@ class InsightProviderTests(unittest.TestCase):
             }
         ).encode()
 
-        with patch(
-            "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
-        ):
+        with patch("repomonster.insights.urlrequest.urlopen", return_value=response):
             insight = provider.generate("Review this change")
 
         self.assertEqual(len(insight.findings), 1)
@@ -197,9 +193,7 @@ class InsightProviderTests(unittest.TestCase):
         ).encode()
 
         with (
-            patch(
-                "review_gatekeeper.insights.urlrequest.urlopen", return_value=response
-            ),
+            patch("repomonster.insights.urlrequest.urlopen", return_value=response),
             self.assertRaisesRegex(InsightResponseError, "valid recommendation"),
         ):
             provider.generate("Review this change")
