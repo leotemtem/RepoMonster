@@ -71,7 +71,11 @@ class RuleEngine:
             return []
         if not request.source_files:
             return []
-        if request.task_references:
+        # A "ticket" is only text matching a ticket pattern. Nothing confirms it exists.
+        if any(
+            item.kind != "ticket" or profile.allow_unverified_tickets
+            for item in request.task_references
+        ):
             return []
         return [
             Finding(
@@ -79,7 +83,9 @@ class RuleEngine:
                 category="traceability",
                 title="No linked task or issue",
                 detail=(
-                    "Code changed, but the request is not linked to a ticket, issue, or design note."
+                    "Code changed, but the request is not linked to a verifiable issue or "
+                    "design note. Ticket-style references only count when the repository "
+                    "sets checks.allow_unverified_tickets."
                 ),
                 evidence=[item.path for item in request.source_files[:5]],
             )

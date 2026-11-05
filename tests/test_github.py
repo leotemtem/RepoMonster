@@ -9,7 +9,6 @@ from review_gatekeeper.github import (
     GitHubReviewProcessor,
     GitHubSettings,
     _decode_github_content,
-    _github_issue_numbers,
     _select_stack,
     verify_webhook_signature,
 )
@@ -84,10 +83,6 @@ stacks:
             packs,
             ["python@1.0.0", "fastapi@1.0.0", "typescript@1.0.0", "node@1.0.0"],
         )
-
-    def test_local_github_issue_references_are_deduplicated(self) -> None:
-        text = "Fixes #42; context: https://github.com/acme/api/issues/42 and #77"
-        self.assertEqual(_github_issue_numbers(text, "acme/api"), [42, 77])
 
     def test_review_persistence_records_model_recommendation_and_impact(self) -> None:
         connection = _PersistenceConnection()

@@ -122,9 +122,7 @@ class PostgresStandardsRepository:
                 review_settings = dict(row[0])
                 if profile_id == "default":
                     profile_id = row[1]
-        path = self.profiles_root / f"{profile_id}.json"
-        if not path.exists():
-            raise FileNotFoundError(f"Unknown profile: {profile_id}")
+        path = _profile_path(self.profiles_root, profile_id)
         payload = json.loads(path.read_text())
         payload["required_ci"] = review_settings.get("required_ci", [])
         if "require_task_reference" in review_settings:
@@ -134,6 +132,10 @@ class PostgresStandardsRepository:
         if "require_test_evidence" in review_settings:
             payload["require_test_evidence_when_code_changes"] = review_settings[
                 "require_test_evidence"
+            ]
+        if "allow_unverified_tickets" in review_settings:
+            payload["allow_unverified_tickets"] = review_settings[
+                "allow_unverified_tickets"
             ]
         if "auto_block" in review_settings:
             payload["auto_block"] = review_settings["auto_block"]
@@ -288,9 +290,7 @@ class BundledPackRepository:
     def load_profile(
         self, profile_id: str, request: ReviewRequest | None = None
     ) -> ReviewProfile:
-        path = self.profiles_root / f"{profile_id}.json"
-        if not path.exists():
-            raise FileNotFoundError(f"Unknown profile: {profile_id}")
+        path = _profile_path(self.profiles_root, profile_id)
         return ReviewProfile.from_dict(json.loads(path.read_text()))
 
     def list_documents(self) -> list[StandardDocument]:
@@ -342,6 +342,16 @@ class BundledPackRepository:
             ranked.append((profile.retrieval_order.index(document.scope), document))
         ranked.sort(key=lambda item: (item[0], item[1].id))
         return [document for _, document in ranked[:limit]]
+
+
+def _profile_path(profiles_root: Path, profile_id: str) -> Path:
+    root = profiles_root.resolve()
+    path = (root / f"{profile_id}.json").resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("Profile must stay inside the profiles directory")
+    if not path.is_file():
+        raise FileNotFoundError(f"Unknown profile: {profile_id}")
+    return path
 
 
 def _vector_literal(vector: list[float], expected_dimensions: int) -> str:

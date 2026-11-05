@@ -141,7 +141,7 @@ checks:
   require_task_reference: true
 ```
 
-Reference a local GitHub issue in the PR title or description:
+Reference a local GitHub issue in the PR title or description using an issue number of at most ten digits:
 
 ```markdown
 Fixes #42
@@ -169,7 +169,7 @@ All fields are lists of repository-relative files or glob patterns:
 | `requirements` | behavioral requirements, acceptance rules, operational constraints |
 | `standards` | repository-specific coding, testing, security, and design standards |
 
-Matched files are UTF-8 text. The operator controls maximum file count and file size with GitHub environment settings.
+Matched files must be UTF-8 text without NUL characters. The operator controls maximum file count and file size with GitHub environment settings.
 
 ### `stacks`
 
@@ -196,7 +196,7 @@ stacks:
     packs: [typescript@1.0.0, node@1.0.0]
 ```
 
-The dominant changed stack supplies the review request's primary language and framework. All matched pack selections are pinned during repository onboarding.
+The dominant changed stack supplies the review request's primary language and framework. All matched pack selections are pinned during repository onboarding. Every selected pack version must already be installed; selections are validated before knowledge synchronization.
 
 ### `checks.required_ci`
 
@@ -209,7 +209,21 @@ checks:
     - lint
 ```
 
-Start with an empty list until the repository's actual GitHub check names are known. Missing, queued, or failed required checks produce deterministic errors.
+Start with an empty list until the repository's actual GitHub check names are known. Results include all pages of Check Runs and commit statuses. When several results share a name, a failure takes precedence, followed by a pending result. A required name succeeds only when every result for that name succeeds.
+
+Missing or pending required checks keep the RepoMonster Check Run in progress until they finish or the configured wait expires. Failed required checks produce deterministic errors.
+
+Anyone who can report a check or commit status with a required name can satisfy that name. To accept a check only from one GitHub App, pin it:
+
+```yaml
+checks:
+  required_ci:
+    - lint
+    - name: test
+      app_id: 15368
+```
+
+A pinned name ignores commit statuses and other apps' check runs with that name.
 
 ### `checks.require_task_reference`
 
@@ -217,6 +231,10 @@ Start with an empty list until the repository's actual GitHub check names are kn
 - `false`: the structured PR description can be the task specification
 
 This setting controls readiness, not whether retrieval or model analysis runs.
+
+### `checks.allow_unverified_tickets`
+
+Defaults to `false`. RepoMonster cannot confirm that a ticket-style reference such as `AB-1` exists, so it only satisfies `require_task_reference` when this is `true`. A linked local GitHub issue always counts.
 
 ### `checks.require_test_evidence`
 
@@ -240,11 +258,13 @@ checks:
 
 With `require_poor_documentation: true`, enforcement requires a deterministic PR-description finding such as missing required sections, missing test evidence, or weak written context for a large change. The model must also recommend `request_changes` or `block` and return at least one warning or error whose impact meets the configured threshold and whose evidence is non-empty. Model output alone cannot trigger this composite rule. Existing deterministic errors continue to block independently.
 
-Start in `shadow` and review false positives before enabling `enforce`. Insight timeouts, malformed output, and missing recommendations remain `manual_escalation`; they never become automatic blocks.
+Start in `shadow` and review false positives before enabling `enforce`. Insight timeouts, malformed output, and missing recommendations never trigger the auto-block policy. They show as `manual_escalation`, or as `blocked` if deterministic errors already exist.
 
 ### `model.profile`
 
-Selects a deployment-owned JSON profile under `profiles/`. The repository can select a profile name but cannot define endpoint URLs, API keys, or arbitrary model settings.
+Selects an existing deployment-owned JSON profile under `profiles/`. Profile names use only lowercase letters, digits, underscores, and hyphens. The resolved file must remain inside the profiles directory. The repository can select a profile name but cannot define endpoint URLs, API keys, or arbitrary model settings.
+
+Invalid YAML, incorrect configuration field types, unavailable profiles or packs, and invalid knowledge text publish a configuration-specific `action_required` result on the first processing attempt without retrying. The `model`, `knowledge`, and `checks` sections must be mappings; path, pack, and required-CI lists must contain strings. Correct the default-branch configuration and update the PR to request another review.
 
 The shipped `default` profile:
 
@@ -266,6 +286,8 @@ Deterministic checks currently evaluate:
 - required CI status
 - large changes with weak written context
 - likely API/schema changes without documentation changes
+
+File classification uses complete directory segments and file-name conventions. Documentation files have a `.md`, `.mdx`, or `.rst` extension. Tests are identified by `test`, `tests`, `__tests__`, `tests_e2e`, or `tests_integration` directory segments, `test_` or `_test` file names, or JavaScript/TypeScript `.test` and `.spec` file names. Other files remain source changes, including code within `docs` and `testing_utils` directories.
 
 The model is asked to evaluate:
 

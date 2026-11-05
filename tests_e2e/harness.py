@@ -190,11 +190,24 @@ class FakeGitHub:
         status: str = "completed",
         conclusion: str | None = "success",
         sha: str = HEAD_SHA,
+        app_id: int = 999,
     ) -> None:
         with self.lock:
             checks = self.external_checks.setdefault(sha, [])
-            checks[:] = [check for check in checks if check["name"] != name]
-            checks.append({"name": name, "status": status, "conclusion": conclusion})
+            checks[:] = [
+                check
+                for check in checks
+                if check["name"] != name
+                or check.get("app", {}).get("id", app_id) != app_id
+            ]
+            checks.append(
+                {
+                    "name": name,
+                    "status": status,
+                    "conclusion": conclusion,
+                    "app": {"id": app_id},
+                }
+            )
 
     def fail_next(self, method: str, path_pattern: str, status: int = 500) -> None:
         with self.lock:
@@ -351,10 +364,23 @@ class FakeGitHub:
                     if run["head_sha"] == sha
                 ]
                 checks = [*self.external_checks.get(sha, []), *own]
-            return 200, {"total_count": len(checks), "check_runs": checks}
+            page = int(query.get("page", ["1"])[0])
+            per_page = int(query.get("per_page", ["100"])[0])
+            start = (page - 1) * per_page
+            return 200, {
+                "total_count": len(checks),
+                "check_runs": checks[start : start + per_page],
+            }
         if match := re.fullmatch(r"/commits/([^/]+)/status", route):
             sha = urlparse.unquote(match[1])
-            return 200, {"statuses": self.statuses.get(sha, [])}
+            statuses = self.statuses.get(sha, [])
+            page = int(query.get("page", ["1"])[0])
+            per_page = int(query.get("per_page", ["100"])[0])
+            start = (page - 1) * per_page
+            return 200, {
+                "total_count": len(statuses),
+                "statuses": statuses[start : start + per_page],
+            }
         return 404, {"message": f"Unhandled route: {method} {path}"}
 
     def _files_for_ref(self, ref: str) -> dict[str, str]:

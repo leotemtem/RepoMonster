@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Any
 
 
@@ -106,24 +107,26 @@ class ChangedFile:
         return self.additions + self.deletions
 
     def is_test_file(self) -> bool:
-        lowered = self.path.lower()
+        path = PurePosixPath(self.path.lower())
         return (
-            "/test" in lowered
-            or "/tests/" in lowered
-            or lowered.startswith("test")
-            or lowered.startswith("tests/")
-            or lowered.endswith("_test.py")
-            or lowered.endswith(".spec.ts")
-            or lowered.endswith(".spec.tsx")
-            or lowered.endswith(".test.ts")
-            or lowered.endswith(".test.tsx")
+            any(
+                part in {"test", "tests", "__tests__", "tests_e2e", "tests_integration"}
+                for part in path.parts[:-1]
+            )
+            or path.stem.startswith("test_")
+            or path.stem.endswith("_test")
+            or (
+                path.suffix in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+                and path.stem.endswith((".spec", ".test"))
+            )
         )
 
     def is_documentation_file(self) -> bool:
-        lowered = self.path.lower()
-        return (
-            lowered.endswith(".md") or lowered.endswith(".mdx") or "/docs/" in lowered
-        )
+        return PurePosixPath(self.path.lower()).suffix in {
+            ".md",
+            ".mdx",
+            ".rst",
+        }
 
     def is_source_file(self) -> bool:
         return not self.is_test_file() and not self.is_documentation_file()
@@ -284,6 +287,7 @@ class ReviewProfile:
     retrieval_order: list[str]
     required_ci: list[str] = field(default_factory=list)
     auto_block: AutoBlockPolicy = field(default_factory=AutoBlockPolicy)
+    allow_unverified_tickets: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ReviewProfile:
@@ -307,6 +311,9 @@ class ReviewProfile:
             retrieval_order=list(payload.get("retrieval_order", [])),
             required_ci=list(payload.get("required_ci", [])),
             auto_block=AutoBlockPolicy.from_dict(payload.get("auto_block")),
+            allow_unverified_tickets=bool(
+                payload.get("allow_unverified_tickets", False)
+            ),
         )
 
 

@@ -95,6 +95,8 @@ Deployment environment variables, profiles, bundled packs, provider credentials,
 
 Repository configuration may select known profiles and packs but cannot define model endpoints, credentials, or files outside the repository.
 
+Policy parsing validates mapping sections and string list entries before processing. Profile names contain only lowercase letters, digits, underscores, and hyphens; resolved profile files must stay within the operator's profiles directory. Profile availability and all selected pack versions are checked before knowledge synchronization. Invalid YAML, malformed configuration, unavailable profiles or packs, and NUL characters in repository knowledge produce a configuration-specific `action_required` Check Run on the first attempt without consuming retries or exposing database diagnostics.
+
 ### Untrusted review evidence
 
 PR titles, descriptions, patches, source paths, issues, CI output, and retrieved text are treated as evidence, not instructions. The insight system prompt reinforces this boundary, but model behavior is not itself a security boundary.
@@ -165,6 +167,8 @@ The provider-independent `ReviewRequest` contains:
 
 The deterministic `RuleEngine` produces findings first. Retrieved guidance and deterministic findings are then included in the insight brief. Validated model findings are appended to the deterministic findings.
 
+Changed files are classified using directory segments and file-name conventions. Documentation requires a `.md`, `.mdx`, or `.rst` extension. Test directory segments and test file-name conventions identify test changes; other files remain source changes, including code in documentation and utility directories.
+
 The default gate decision is:
 
 ```text
@@ -178,7 +182,7 @@ else
 
 After that base decision, an optional composite auto-block policy can upgrade a non-blocked result to `blocked`. The policy requires all configured conditions: a deterministic poor-PR-documentation signal, a model recommendation of `request_changes` or `block`, and at least one evidence-backed model warning or error at or above the configured impact threshold. `shadow` mode appends an informational audit finding without changing the base decision; `enforce` mode applies the upgrade. Raw warning counts and model recommendations by themselves are insufficient.
 
-An insight exception returns `manual_escalation` with the deterministic findings preserved. It does not fall through to a successful deterministic-only decision when an insight endpoint was configured but failed.
+An insight exception returns `blocked` if deterministic errors exist, and `manual_escalation` otherwise, with the deterministic findings preserved. It does not fall through to a successful deterministic-only decision when an insight endpoint was configured but failed.
 
 ## Provider boundary
 
@@ -192,6 +196,8 @@ Provider adapters own:
 - publication
 
 The GitHub adapter implements this boundary for pull requests. Stale deliveries are ignored when their head SHA no longer matches the current PR. Drafts receive a neutral check. Supported actions are opened, reopened, synchronize, edited, and ready-for-review.
+
+Local issue references accept at most ten digits. CI collection paginates Check Runs and commit statuses and combines same-named evidence conservatively: any failure wins, otherwise any pending result wins, and success requires every result for that name to succeed.
 
 While a required check is pending or has not appeared, the Check Run stays `in_progress`, no gate decision is published, and no model call is made. Completed `check_run` and `status` events for a required check re-review the open pull requests on that head SHA, continuing the open Check Run. RepoMonster ignores its own Check Run and skips a re-review if the required check results have not changed. A delayed queue job keyed to the Check Run ends the wait in `manual_escalation` after `CI_WAIT_TIMEOUT_SECONDS`.
 
