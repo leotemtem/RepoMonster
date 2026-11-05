@@ -109,6 +109,8 @@ class FakeGitHub:
         self.requests: list[tuple[str, str]] = []
         self.failures: list[tuple[str, re.Pattern[str], int, str | None]] = []
         self.hooks: list[tuple[str, re.Pattern[str], Callable[[], None]]] = []
+        self.redirects: dict[str, str] = {}
+        self.embedding_inputs: list[list[str]] = []
         self.token_requests: list[dict[str, Any]] = []
         self.default_files: dict[str, str] = {
             ".repomonster.yml": repository_config([DEFAULT_REQUIRED_CI]),
@@ -247,6 +249,8 @@ class FakeGitHub:
         retry_after = None
         try:
             if method == "POST" and parsed.path == "/embeddings":
+                with self.lock:
+                    self.embedding_inputs.append(payload["input"])
                 status, body = 200, self._embeddings(payload)
             elif method == "POST" and parsed.path == "/chat/completions":
                 with self.lock:
@@ -266,7 +270,9 @@ class FakeGitHub:
                     )
                     if injected:
                         self.failures.remove(injected)
-                if injected:
+                if parsed.path in self.redirects:
+                    status, body = 302, {"message": "redirect"}
+                elif injected:
                     status, body = injected[2], {"message": "injected failure"}
                     retry_after = injected[3]
                 else:
@@ -294,6 +300,8 @@ class FakeGitHub:
             hook[2]()
         encoded = json.dumps(body).encode()
         handler.send_response(status)
+        if status == 302:
+            handler.send_header("Location", self.redirects[parsed.path])
         if retry_after:
             handler.send_header("Retry-After", retry_after)
         handler.send_header("Content-Type", "application/json")
@@ -607,6 +615,7 @@ def service_environment(
         "GITHUB_WEBHOOK_SECRET": WEBHOOK_SECRET,
         "GITHUB_API_URL": fake_url,
         "GITHUB_TIMEOUT_SECONDS": "10",
+        "HTTP_MAX_RETRIES": "0",
         "WORKER_POLL_SECONDS": "0.05",
         "WEBHOOK_MAX_ATTEMPTS": "3",
         "WEBHOOK_RETRY_BASE_SECONDS": "0.1",
