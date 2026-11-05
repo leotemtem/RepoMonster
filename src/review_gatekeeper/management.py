@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from .config import load_repository_config
-from .database import DatabaseMigrator, project_root
+from .database import DatabaseMigrator, database_connect_timeout, project_root
+from .factory import build_review_service
 from .github import GitHubClient, GitHubReviewProcessor, GitHubSettings
-from .insights import OpenAICompatibleInsightProvider
 from .jobs import LostJobLock, WebhookJob, WebhookQueue
 from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
 from .packs import PackSynchronizer, discover_packs
-from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
-from .service import ReviewService
+from .pool import build_connection_pool
+from .repository import OpenAICompatibleEmbeddingProvider
 
 
 def _connect():
@@ -29,7 +29,9 @@ def _connect():
         raise RuntimeError(
             "Install database dependencies with: pip install -e '.[db]'"
         ) from exc
-    return psycopg.connect(os.environ["DATABASE_URL"])
+    return psycopg.connect(
+        os.environ["DATABASE_URL"], connect_timeout=database_connect_timeout()
+    )
 
 
 def _migrate() -> int:
@@ -166,6 +168,7 @@ def _retry_on_database_error(
         try:
             return operation()
         except psycopg.OperationalError:
+            # Includes psycopg_pool.PoolTimeout when no connection is available.
             logger.exception("database unavailable; retrying in %s seconds", delay)
             if stop.wait(delay):
                 return None
@@ -195,32 +198,18 @@ def _publish_terminal_failure(
 
 
 def _worker() -> int:
-    root = project_root()
-    database_url = os.environ["DATABASE_URL"]
+    pool = build_connection_pool(os.environ["DATABASE_URL"], worker=True)
     embedding_provider = OpenAICompatibleEmbeddingProvider.from_environment()
-    insight_provider = (
-        OpenAICompatibleInsightProvider.from_environment()
-        if os.getenv("INSIGHT_BASE_URL")
-        else None
-    )
-    review_service = ReviewService(
-        PostgresStandardsRepository(
-            database_url=database_url,
-            embedding_provider=embedding_provider,
-            profiles_root=root / "profiles",
-            tenant_key=os.getenv("TENANT_KEY"),
-        ),
-        insight_provider=insight_provider,
-    )
+    review_service = build_review_service(pool, embedding_provider)
     queue = WebhookQueue(
-        database_url,
+        pool,
         max_attempts=int(os.getenv("WEBHOOK_MAX_ATTEMPTS", "8")),
         lock_timeout_seconds=int(os.getenv("WEBHOOK_LOCK_TIMEOUT_SECONDS", "900")),
         retry_base_seconds=float(os.getenv("WEBHOOK_RETRY_BASE_SECONDS", "15")),
         retry_max_seconds=float(os.getenv("WEBHOOK_RETRY_MAX_SECONDS", "900")),
     )
     processor = GitHubReviewProcessor(
-        database_url=database_url,
+        pool=pool,
         queue=queue,
         client=GitHubClient(GitHubSettings.from_environment()),
         embedding_provider=embedding_provider,
@@ -235,31 +224,35 @@ def _worker() -> int:
     logger = logging.getLogger("repomonster.worker")
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    logger.info("GitHub review worker started")
-    while not stop.is_set():
-        job = _retry_on_database_error(queue.claim, stop, logger)
-        if job is None:
-            stop.wait(poll_seconds)
-            continue
-        if job.exhausted:
-            _publish_terminal_failure(job, queue, processor, stop, logger)
-            continue
-        try:
-            with _Heartbeat(queue, job, logger):
-                processed = processor.process(job)
-        except LostJobLock:
-            logger.warning("delivery %s lost its lock; stopping", job.delivery_id)
-            continue
-        except Exception as exc:
-            logger.exception(
-                "delivery %s failed on attempt %s", job.delivery_id, job.attempts
+    pool.open(wait=False)
+    try:
+        logger.info("GitHub review worker started")
+        while not stop.is_set():
+            job = _retry_on_database_error(queue.claim, stop, logger)
+            if job is None:
+                stop.wait(poll_seconds)
+                continue
+            if job.exhausted:
+                _publish_terminal_failure(job, queue, processor, stop, logger)
+                continue
+            try:
+                with _Heartbeat(queue, job, logger):
+                    processed = processor.process(job)
+            except LostJobLock:
+                logger.warning("delivery %s lost its lock; stopping", job.delivery_id)
+                continue
+            except Exception as exc:
+                logger.exception(
+                    "delivery %s failed on attempt %s", job.delivery_id, job.attempts
+                )
+                _retry_on_database_error(partial(queue.fail, job, exc), stop, logger)
+                continue
+            _retry_on_database_error(
+                partial(queue.complete, job, ignored=not processed), stop, logger
             )
-            _retry_on_database_error(partial(queue.fail, job, exc), stop, logger)
-            continue
-        _retry_on_database_error(
-            partial(queue.complete, job, ignored=not processed), stop, logger
-        )
-        logger.info("delivery %s completed", job.delivery_id)
+            logger.info("delivery %s completed", job.delivery_id)
+    finally:
+        pool.close()
     logger.info("GitHub review worker stopped")
     return 0
 

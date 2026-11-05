@@ -4,7 +4,10 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 
 class LostJobLock(RuntimeError):
@@ -31,27 +34,18 @@ class WebhookQueue:
 
     def __init__(
         self,
-        database_url: str,
+        pool: ConnectionPool,
         max_attempts: int = 5,
         lock_timeout_seconds: int = 900,
         retry_base_seconds: float = 15,
         retry_max_seconds: float = 900,
     ) -> None:
-        self.database_url = database_url
+        self.pool = pool
         self.max_attempts = max_attempts
         self.lock_timeout = timedelta(seconds=lock_timeout_seconds)
         self.heartbeat_seconds = lock_timeout_seconds / 3
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
-
-    def _connect(self):
-        try:
-            import psycopg
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "Install database dependencies with: pip install -e '.[db]'"
-            ) from exc
-        return psycopg.connect(self.database_url)
 
     def enqueue(
         self,
@@ -62,7 +56,7 @@ class WebhookQueue:
         payload: dict[str, Any],
         delay_seconds: int = 0,
     ) -> bool:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 INSERT INTO webhook_deliveries (
@@ -94,7 +88,7 @@ class WebhookQueue:
             return None
 
     def _claim(self) -> WebhookJob | None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT id, provider, delivery_id, event_name, payload, attempts,
@@ -148,7 +142,7 @@ class WebhookQueue:
 
     def _update_owned(self, job: WebhookJob, assignments: str, *values: Any) -> bool:
         """Apply a change only if this worker still owns the job."""
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 f"""
                 UPDATE webhook_deliveries
@@ -163,7 +157,7 @@ class WebhookQueue:
         return self._update_owned(job, "locked_at = now()")
 
     def verify_lock(self, job: WebhookJob) -> None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT 1 FROM webhook_deliveries
@@ -176,7 +170,7 @@ class WebhookQueue:
 
     def has_newer_pull_request_delivery(self, job: WebhookJob) -> bool:
         """Report whether a later delivery will review the same pull request anyway."""
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT 1 FROM webhook_deliveries

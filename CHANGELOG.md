@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- API and worker database components share one bounded, health-checked connection
+  pool per process and one review-service factory. Added configurable pool sizes,
+  checkout, connect and statement timeouts. Pools open without waiting for database
+  availability and close at shutdown; workers require at least two connections for
+  heartbeats. Management commands retain dedicated connections without the pooled
+  statement timeout, and `/readyz` uses a public repository method.
+
 - GitHub and embedding requests share a redirect-rejecting HTTP client with
   bounded retries. Check Run creation is not retried within a queue attempt.
   Added `HTTP_MAX_RETRIES`, `EMBEDDING_TIMEOUT_SECONDS` and

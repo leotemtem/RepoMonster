@@ -3,15 +3,15 @@ from __future__ import annotations
 import hmac
 import json
 import os
-from typing import TYPE_CHECKING, Any
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, cast
 
-from .database import project_root
+from .factory import build_review_service
 from .github import should_queue_event, verify_webhook_signature
-from .insights import OpenAICompatibleInsightProvider
 from .jobs import WebhookQueue
 from .models import ReviewRequest
+from .pool import build_connection_pool
 from .repository import OpenAICompatibleEmbeddingProvider, PostgresStandardsRepository
-from .service import ReviewService
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -96,26 +96,27 @@ def create_app() -> Any:
             "Install optional web dependencies with: pip install -e '.[web]'"
         )
 
-    root = project_root()
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError(
             "DATABASE_URL is required; runtime standards retrieval uses PostgreSQL"
         )
-    insight_provider = (
-        OpenAICompatibleInsightProvider.from_environment()
-        if os.getenv("INSIGHT_BASE_URL")
-        else None
+    pool = build_connection_pool(database_url)
+    service = build_review_service(
+        pool, OpenAICompatibleEmbeddingProvider.from_environment()
     )
-    repository = PostgresStandardsRepository(
-        database_url=database_url,
-        embedding_provider=OpenAICompatibleEmbeddingProvider.from_environment(),
-        profiles_root=root / "profiles",
-        tenant_key=os.getenv("TENANT_KEY"),
-    )
-    service = ReviewService(repository, insight_provider=insight_provider)
-    webhook_queue = WebhookQueue(database_url)
-    app = FastAPI(title="Review Gatekeeper", version="0.1.0")
+    repository = cast(PostgresStandardsRepository, service.repository)
+    webhook_queue = WebhookQueue(pool)
+
+    @asynccontextmanager
+    async def lifespan(app: Any):
+        pool.open(wait=False)
+        try:
+            yield
+        finally:
+            pool.close()
+
+    app = FastAPI(title="Review Gatekeeper", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         BodyLimitMiddleware, max_bytes=int(os.getenv("MAX_WEBHOOK_BYTES", "2000000"))
     )
@@ -131,12 +132,7 @@ def create_app() -> Any:
     # A plain def runs in the threadpool, so a slow database cannot stall the event loop.
     @app.get("/readyz")
     def readyz() -> dict[str, Any]:
-        with repository._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT count(*) FROM standard_pack_versions WHERE status = 'ready'"
-            )
-            ready_packs = int(cursor.fetchone()[0])
-        return {"status": "ready", "standard_packs": ready_packs}
+        return {"status": "ready", "standard_packs": repository.ready_pack_count()}
 
     @app.post("/review")
     async def review(

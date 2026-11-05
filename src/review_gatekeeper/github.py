@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib import parse as urlparse
 
 import httpx
@@ -37,6 +37,9 @@ from .providers import normalize_github_event
 from .repository import EmbeddingProvider
 from .service import ReviewService
 from .url_safety import require_http_url
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 CHECK_NAME = "RepoMonster review gate"
 SUPPORTED_PULL_REQUEST_ACTIONS = {
@@ -426,13 +429,13 @@ class GitHubReviewProcessor:
     def __init__(
         self,
         *,
-        database_url: str,
+        pool: ConnectionPool,
         queue: WebhookQueue,
         client: GitHubClient,
         embedding_provider: EmbeddingProvider,
         review_service: ReviewService,
     ) -> None:
-        self.database_url = database_url
+        self.pool = pool
         self.queue = queue
         self.client = client
         self.embedding_provider = embedding_provider
@@ -691,7 +694,7 @@ class GitHubReviewProcessor:
     ) -> bool:
         head_sha = str(pull_request["head"]["sha"])
         repository_key = f"github:{_repository_origin(repository)}:{repository['id']}"
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT request_payload FROM review_runs
@@ -906,7 +909,7 @@ class GitHubReviewProcessor:
             raise RepositoryConfigurationError(
                 f"The selected model profile is unavailable: {config.model_profile}."
             ) from exc
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             for selection in config.selected_packs:
                 pack_id, version = selection.rsplit("@", 1)
                 cursor.execute(
@@ -959,7 +962,7 @@ class GitHubReviewProcessor:
             *[(source, "repo", None) for source in sources],
             *[(source, "task", task_key) for task_key, source in task_sources],
         ]
-        with self._connect() as connection:
+        with self.pool.connection() as connection:
             stale = RepositoryKnowledgeSynchronizer(
                 connection, self.embedding_provider
             ).stale_chunks(repository_key, synced_sources)
@@ -969,7 +972,7 @@ class GitHubReviewProcessor:
         }
 
         self.queue.verify_lock(job)
-        with self._connect() as connection:
+        with self.pool.connection() as connection:
             installation_db_id = self._upsert_installation(
                 connection,
                 external_id=installation_external_id,
@@ -1256,7 +1259,7 @@ class GitHubReviewProcessor:
             return int(cursor.fetchone()[0])
 
     def _persist_result(self, request: ReviewRequest, result) -> None:
-        with self._connect() as connection, connection.cursor() as cursor:
+        with self.pool.connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT id FROM repositories WHERE repository_key = %s",
                 (request.resolved_repository_key(),),
@@ -1296,7 +1299,8 @@ class GitHubReviewProcessor:
                     result.insight_recommendation_reason or None,
                 ),
             )
-            run_id = int(cursor.fetchone()[0])
+            row = cast(tuple[int], cursor.fetchone())
+            run_id = int(row[0])
             cursor.execute(
                 "DELETE FROM review_findings WHERE review_run_id = %s", (run_id,)
             )
@@ -1319,15 +1323,6 @@ class GitHubReviewProcessor:
                         json.dumps(finding.evidence),
                     ),
                 )
-
-    def _connect(self):
-        try:
-            import psycopg
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "Install database dependencies with: pip install -e '.[db]'"
-            ) from exc
-        return psycopg.connect(self.database_url)
 
 
 def _decode_github_content(payload: dict[str, Any]) -> str:

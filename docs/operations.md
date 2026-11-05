@@ -46,6 +46,35 @@ cp .env.example .env
 
 Generate passwords and API keys with a cryptographically secure tool. Do not commit `.env`.
 
+### Database connections and timeouts
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `DATABASE_URL` | none | PostgreSQL connection string for the API, worker and management commands |
+| `DATABASE_POOL_MIN_SIZE` | `1` | minimum pooled connections per API or worker process; non-negative integer |
+| `DATABASE_POOL_MAX_SIZE` | `5` | maximum pooled connections per process; must be at least the minimum and at least `2` for workers |
+| `DATABASE_POOL_TIMEOUT_SECONDS` | `10` | maximum wait for a pool checkout; positive seconds |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `10` | connection establishment timeout for pooled and dedicated connections; positive integer seconds |
+| `DATABASE_STATEMENT_TIMEOUT_SECONDS` | `30` | timeout per SQL statement on pooled connections, including lock waits; at least `0.001` seconds |
+
+Each API and worker process owns one pool shared by its database components. Budget
+for `DATABASE_POOL_MAX_SIZE` connections per process, plus dedicated management and
+operator connections. Workers require at least two so the heartbeat can renew a job
+while processing holds a connection. Connections are checked before checkout and
+replaced after a database restart. Pool checkout timeouts follow the worker's database
+outage retry path; a timed-out review statement rolls back and the queue retries the
+delivery under its existing attempt and backoff limits.
+
+Pools open without waiting for PostgreSQL, so a brief database outage does not prevent
+the API from starting. `/readyz` checks database access through the repository, while
+`/healthz` remains available during an outage. Pools close when their process shuts
+down. Provider, embedding and insight HTTP calls do not hold pooled connections.
+
+Migrations, standard-pack sync/reindex, repository `sync-local` and bootstrap keep
+dedicated connections for their long transactions. They use the connect timeout but
+do not apply `DATABASE_STATEMENT_TIMEOUT_SECONDS`; any database/operator session
+defaults still apply.
+
 ### Embedding endpoint
 
 | Variable | Required | Purpose |

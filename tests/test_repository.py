@@ -91,11 +91,10 @@ class PostgresRepositoryTests(unittest.TestCase):
     def test_nullable_retrieval_filters_have_explicit_postgres_types(self) -> None:
         connection = _Connection()
         repository = PostgresStandardsRepository(
-            database_url="postgresql://unused",
+            pool=_Pool(connection),
             embedding_provider=_EmbeddingProvider(),
             profiles_root=Path("profiles"),
         )
-        repository._connect = lambda: connection
         request = ReviewRequest.from_dict(
             {
                 "provider": "github",
@@ -118,6 +117,14 @@ class PostgresRepositoryTests(unittest.TestCase):
         self.assertEqual(sql.count("%s::text IS NOT NULL"), 2)
         self.assertIsNone(params[7])
         self.assertIsNone(params[9])
+
+
+class _Pool:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def connection(self):
+        return self._connection
 
 
 if __name__ == "__main__":
