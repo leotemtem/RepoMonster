@@ -44,7 +44,7 @@ The API exposes:
 - authenticated direct reviews
 - signed GitHub webhook ingestion
 
-The GitHub request path performs bounded body reading, HMAC verification, JSON parsing, event filtering, and an idempotent queue insert. It returns before provider, embedding, or model work starts.
+Request bodies are limited while they arrive, and database and model work runs off the event loop. The direct review route checks credentials before reading its body. The GitHub request path performs bounded body reading, HMAC verification, JSON parsing, event filtering, and an idempotent queue insert. It returns before provider, embedding, or model work starts.
 
 ### Worker
 
@@ -198,7 +198,7 @@ Provider adapters own:
 - changed-file, task, and CI evidence
 - publication
 
-The GitHub adapter implements this boundary for pull requests. Stale deliveries are ignored when their head SHA no longer matches the current PR. Drafts receive a neutral check. Supported actions are opened, reopened, synchronize, edited, and ready-for-review.
+The GitHub adapter implements this boundary for pull requests. Stale deliveries are ignored when their head SHA no longer matches the current PR, and a delivery is also ignored when a newer one for the same PR is waiting, so a burst of edits costs one review. At most five linked issues are embedded per delivery. Drafts receive a neutral check. Supported actions are opened, reopened, synchronize, edited, and ready-for-review.
 
 Local issue references accept at most ten digits. CI collection paginates Check Runs and commit statuses and combines same-named evidence conservatively: any failure wins, otherwise any pending result wins, and success requires every result for that name to succeed.
 

@@ -174,6 +174,26 @@ class WebhookQueue:
             if cursor.fetchone() is None:
                 raise LostJobLock(f"delivery {job.delivery_id} has a new owner")
 
+    def has_newer_pull_request_delivery(self, job: WebhookJob) -> bool:
+        """Report whether a later delivery will review the same pull request anyway."""
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 1 FROM webhook_deliveries
+                WHERE provider = %s AND serial_key = %s AND status = 'pending'
+                  AND event_name = 'pull_request' AND id > %s
+                  AND payload ->> 'number' = %s
+                LIMIT 1
+                """,
+                (
+                    job.provider,
+                    _serial_key(job.payload),
+                    job.id,
+                    str(job.payload.get("number")),
+                ),
+            )
+            return cursor.fetchone() is not None
+
     def complete(self, job: WebhookJob, *, ignored: bool = False) -> bool:
         return self._update_owned(
             job,

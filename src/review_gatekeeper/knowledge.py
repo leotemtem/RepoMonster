@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 
 from .config import RepositoryConfig
@@ -253,6 +254,14 @@ class RepositoryKnowledgeSynchronizer:
         stack_key = f"{source.language or 'any'}/{source.framework or 'any'}"
 
         with self.connection.cursor() as cursor:
+            # Issues change often and old versions have no further use.
+            cursor.execute(
+                """
+                DELETE FROM standard_documents
+                WHERE logical_key = %s AND id <> %s AND scope = 'task'
+                """,
+                (logical_key, document_id),
+            )
             cursor.execute(
                 """
                 UPDATE standard_documents
@@ -354,4 +363,9 @@ def _source_identity(
     namespace = f"task:{task_key}" if scope == "task" else "repo"
     logical_key = f"{namespace}:{repository_key}:{source.path}"
     document_id = f"{logical_key}@{source.source_sha}"
-    return checksum, logical_key, document_id, chunk_markdown(source.content)
+    chunks = chunk_markdown(source.content)[: max_chunks_per_source()]
+    return checksum, logical_key, document_id, chunks
+
+
+def max_chunks_per_source() -> int:
+    return int(os.getenv("KNOWLEDGE_MAX_CHUNKS_PER_SOURCE", "200"))

@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Added resource limits: request bodies are rejected while they arrive, `/review`
+  authenticates before parsing, slow database and model calls no longer stall the
+  API, embedding work is capped per file and per delivery, a burst of edits to one
+  pull request costs one review, and `.repomonster.yml` is size-limited and cannot
+  use YAML aliases.
 - Retrieval now filters before ranking and gives each knowledge scope a fair share.
   The model brief separates untrusted text from guidance and states when it has not
   seen a full diff.

@@ -17,7 +17,11 @@ from urllib import request as urlrequest
 
 from .config import RepositoryConfig, load_repository_config
 from .jobs import WebhookJob, WebhookQueue
-from .knowledge import RepositoryKnowledgeSynchronizer, RepositorySource
+from .knowledge import (
+    RepositoryKnowledgeSynchronizer,
+    RepositorySource,
+    max_chunks_per_source,
+)
 from .models import (
     ChangedFile,
     ChangeRequestKind,
@@ -27,6 +31,7 @@ from .models import (
     ReviewRequest,
     TaskReference,
 )
+from .packs import chunk_markdown
 from .providers import normalize_github_event
 from .repository import EmbeddingProvider
 from .service import ReviewService
@@ -41,6 +46,7 @@ SUPPORTED_PULL_REQUEST_ACTIONS = {
     "ready_for_review",
 }
 CI_EVENTS = {"check_run", "status"}
+MAX_EMBEDDED_ISSUES = 5
 # Internal event: queued by the worker, never accepted from the webhook route.
 CI_WAIT_EVENT = "repomonster_ci_wait"
 CI_WAITING_STATES = {
@@ -444,6 +450,8 @@ class GitHubReviewProcessor:
 
     def _process_pull_request_delivery(self, job: WebhookJob) -> bool:
         if job.payload.get("action") not in SUPPORTED_PULL_REQUEST_ACTIONS:
+            return False
+        if self.queue.has_newer_pull_request_delivery(job):
             return False
 
         normalized = normalize_github_event(job.event_name, job.payload)
@@ -1091,6 +1099,11 @@ class GitHubReviewProcessor:
                 raise RepositoryConfigurationError(
                     f"Repository knowledge must not contain NUL characters: {path}."
                 )
+            if len(chunk_markdown(content)) > max_chunks_per_source():
+                raise RepositoryConfigurationError(
+                    f"Repository knowledge file has too many sections: {path} "
+                    f"(the limit is {max_chunks_per_source()})."
+                )
             stack = config.stacks_for_path(path)
             sources.append(
                 RepositorySource(
@@ -1129,6 +1142,8 @@ class GitHubReviewProcessor:
                 continue
             task_key = f"github:{repository_id}#{number}"
             references.append(TaskReference(kind="github_issue", value=task_key))
+            if len(sources) >= MAX_EMBEDDED_ISSUES:
+                continue
             content = f"# {issue.get('title') or f'Issue #{number}'}\n\n{issue.get('body') or ''}"
             sources.append(
                 (
