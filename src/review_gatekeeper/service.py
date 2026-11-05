@@ -106,6 +106,34 @@ class ReviewService:
             ),
         )
 
+    def escalate(
+        self,
+        request: ReviewRequest,
+        profile_id: str,
+        *,
+        title: str,
+        detail: str,
+        evidence: list[str],
+    ) -> ReviewResult:
+        """Hand a change to a maintainer without running the review."""
+        profile = self.repository.load_profile(profile_id, request)
+        return ReviewResult(
+            gate_state=GateState.MANUAL_ESCALATION,
+            summary=f"manual_escalation: {title}.",
+            findings=[
+                Finding(
+                    severity=Severity.ERROR,
+                    category="ci",
+                    title=title,
+                    detail=detail,
+                    evidence=evidence,
+                )
+            ],
+            applied_profile=profile.id,
+            retrieved_documents=[],
+            llm_review_brief="",
+        )
+
     def _decide(
         self, findings: list[Finding], max_warnings_for_ready: int
     ) -> GateState:

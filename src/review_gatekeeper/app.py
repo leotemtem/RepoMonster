@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from .database import project_root
-from .github import SUPPORTED_PULL_REQUEST_ACTIONS, verify_webhook_signature
+from .github import should_queue_event, verify_webhook_signature
 from .insights import OpenAICompatibleInsightProvider
 from .jobs import WebhookQueue
 from .models import ReviewRequest
@@ -129,9 +129,9 @@ def create_app() -> Any:
             )
         if x_github_event == "ping":
             return {"received": True, "queued": False, "event": "ping"}
-        if x_github_event != "pull_request":
-            return {"received": True, "queued": False, "event": x_github_event}
-        if payload.get("action") not in SUPPORTED_PULL_REQUEST_ACTIONS:
+        if not should_queue_event(
+            x_github_event, payload, os.getenv("GITHUB_APP_ID", "").strip()
+        ):
             return {
                 "received": True,
                 "queued": False,

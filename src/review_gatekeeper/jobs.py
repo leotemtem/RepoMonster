@@ -46,17 +46,20 @@ class WebhookQueue:
         delivery_id: str,
         event_name: str,
         payload: dict[str, Any],
+        delay_seconds: int = 0,
     ) -> bool:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
                 INSERT INTO webhook_deliveries (
-                    provider, delivery_id, event_name, payload
-                ) VALUES (%s, %s, %s, %s::jsonb)
+                    provider, delivery_id, event_name, payload, available_at
+                ) VALUES (
+                    %s, %s, %s, %s::jsonb, now() + make_interval(secs => %s)
+                )
                 ON CONFLICT (provider, delivery_id) DO NOTHING
                 RETURNING id
                 """,
-                (provider, delivery_id, event_name, json.dumps(payload)),
+                (provider, delivery_id, event_name, json.dumps(payload), delay_seconds),
             )
             return cursor.fetchone() is not None
 

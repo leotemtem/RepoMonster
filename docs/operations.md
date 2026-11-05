@@ -98,6 +98,7 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `MAX_WEBHOOK_BYTES` | `2000000` | maximum raw webhook body size |
 | `WEBHOOK_MAX_ATTEMPTS` | `5` | attempts before terminal failure |
 | `WEBHOOK_LOCK_TIMEOUT_SECONDS` | `900` | stale processing-job recovery threshold |
+| `CI_WAIT_TIMEOUT_SECONDS` | `1800` | how long a pull request waits for required checks before manual escalation |
 | `WORKER_POLL_SECONDS` | `2` | queue polling interval |
 
 Keep the lock timeout longer than the maximum expected full review duration.
@@ -131,6 +132,10 @@ RepoMonster does not need administration, workflows, secrets, deployments, or wr
 Subscribe to:
 
 - Pull request
+- Check run
+- Status
+
+RepoMonster re-reviews a pull request when one of its required checks finishes, so without the check run and status events a pull request waiting on CI only concludes when `CI_WAIT_TIMEOUT_SECONDS` runs out.
 
 GitHub sends the `ping` event automatically when the webhook is configured. RepoMonster acknowledges it without queuing a review. Other event types are currently ignored by the GitHub webhook route.
 

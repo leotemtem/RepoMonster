@@ -112,8 +112,8 @@ RepoMonster creates a check named `RepoMonster review gate` on the authoritative
 The result is a readiness recommendation, not code approval:
 
 - `success`: ready for a human maintainer
-- `action_required`: blocked or needs author updates
-- `neutral`: automation could not make a safe decision
+- `action_required`: blocked, needs author updates, or needs a maintainer because automation could not make a safe decision
+- `neutral`: the pull request is a draft or was superseded, so no decision was made
 
 Editing the PR description or pushing another commit creates a new webhook delivery and another review for the current state.
 

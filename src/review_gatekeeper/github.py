@@ -40,6 +40,17 @@ SUPPORTED_PULL_REQUEST_ACTIONS = {
     "edited",
     "ready_for_review",
 }
+CI_EVENTS = {"check_run", "status"}
+# Internal event: queued by the worker, never accepted from the webhook route.
+CI_WAIT_EVENT = "repomonster_ci_wait"
+CI_WAITING_STATES = {
+    "missing",
+    "pending",
+    "queued",
+    "in_progress",
+    "requested",
+    "waiting",
+}
 
 
 class GitHubAPIError(RuntimeError):
@@ -60,6 +71,7 @@ class GitHubSettings:
     api_url: str = "https://api.github.com"
     api_version: str = "2026-03-10"
     request_timeout_seconds: int = 30
+    ci_wait_timeout_seconds: int = 1800
     max_changed_files: int = 1000
     max_knowledge_files: int = 100
     max_knowledge_file_bytes: int = 500_000
@@ -90,6 +102,7 @@ class GitHubSettings:
             api_url=os.getenv("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
             api_version=os.getenv("GITHUB_API_VERSION", "2026-03-10"),
             request_timeout_seconds=int(os.getenv("GITHUB_TIMEOUT_SECONDS", "30")),
+            ci_wait_timeout_seconds=int(os.getenv("CI_WAIT_TIMEOUT_SECONDS", "1800")),
             max_changed_files=int(os.getenv("GITHUB_MAX_CHANGED_FILES", "1000")),
             max_knowledge_files=int(os.getenv("GITHUB_MAX_KNOWLEDGE_FILES", "100")),
             max_knowledge_file_bytes=int(
@@ -103,6 +116,21 @@ def verify_webhook_signature(body: bytes, secret: str, signature: str | None) ->
         return False
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def should_queue_event(event: str, payload: dict[str, Any], app_id: str) -> bool:
+    """Decide whether a verified webhook needs a review job."""
+    if event == "pull_request":
+        return payload.get("action") in SUPPORTED_PULL_REQUEST_ACTIONS
+    if event == "check_run":
+        check_run = payload.get("check_run") or {}
+        if payload.get("action") != "completed":
+            return False
+        # RepoMonster's own Check Run completing must not trigger another review.
+        return str((check_run.get("app") or {}).get("id")) != app_id
+    if event == "status":
+        return payload.get("state") != "pending"
+    return False
 
 
 class GitHubClient:
@@ -139,6 +167,13 @@ class GitHubClient:
     ) -> dict[str, Any]:
         return self._request(
             "GET", f"/repos/{_repository_path(full_name)}/pulls/{number}", token=token
+        )
+
+    def list_open_pull_requests(
+        self, full_name: str, token: str
+    ) -> list[dict[str, Any]]:
+        return self._paginate(
+            f"/repos/{_repository_path(full_name)}/pulls?state=open", token=token
         )
 
     def list_pull_request_files(
@@ -253,6 +288,25 @@ class GitHubClient:
             },
         )
 
+    def update_check_run_progress(
+        self,
+        full_name: str,
+        check_run_id: int,
+        token: str,
+        *,
+        title: str,
+        summary: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "PATCH",
+            f"/repos/{_repository_path(full_name)}/check-runs/{check_run_id}",
+            token=token,
+            payload={
+                "status": "in_progress",
+                "output": {"title": title[:255], "summary": summary[:65_535]},
+            },
+        )
+
     def _app_jwt(self) -> str:
         try:
             import jwt
@@ -340,26 +394,23 @@ class GitHubReviewProcessor:
 
     def process(self, job: WebhookJob) -> bool:
         """Process one delivery. Returns False when the event is intentionally ignored."""
-        if job.event_name != "pull_request":
-            return False
+        if job.event_name == "pull_request":
+            return self._process_pull_request_delivery(job)
+        if job.event_name in CI_EVENTS:
+            return self._process_ci_event(job)
+        if job.event_name == CI_WAIT_EVENT:
+            return self._process_ci_wait_expiry(job)
+        return False
+
+    def _process_pull_request_delivery(self, job: WebhookJob) -> bool:
         if job.payload.get("action") not in SUPPORTED_PULL_REQUEST_ACTIONS:
             return False
 
         normalized = normalize_github_event(job.event_name, job.payload)
-        repository_id = int(normalized.repository_external_id)
-        installation_id = int(normalized.installation_id or 0)
         pull_number = int(normalized.external_id)
-        if not repository_id or not installation_id or not pull_number:
-            raise ValueError(
-                "GitHub pull request webhook is missing repository or installation identity"
-            )
-
-        token = self.client.installation_token(installation_id, repository_id)
-        repository = self.client.get_repository(normalized.repository, token)
-        if int(repository["id"]) != repository_id:
-            raise ValueError(
-                "GitHub repository identity changed during review preparation"
-            )
+        if not pull_number:
+            raise ValueError("GitHub pull request webhook is missing its number")
+        repository, token, installation_id = self._authenticated_repository(job.payload)
         full_name = str(repository["full_name"])
         pull_request = self.client.get_pull_request(full_name, pull_number, token)
         head_sha = str(pull_request["head"]["sha"])
@@ -388,14 +439,14 @@ class GitHubReviewProcessor:
                 )
             return False
         if check_run_id is None:
-            check = self.client.create_check_run(
-                full_name,
-                token,
-                head_sha=head_sha,
-                details_url=pull_request.get("html_url"),
-                external_id=job.delivery_id,
+            open_run = self._open_check_run(full_name, head_sha, token)
+            check_run_id = (
+                int(open_run["id"])
+                if open_run
+                else self._create_check_run(
+                    full_name, pull_request, job.delivery_id, token
+                )
             )
-            check_run_id = int(check["id"])
             self.queue.set_external_result_id(job.id, str(check_run_id))
             job.external_result_id = str(check_run_id)
 
@@ -410,12 +461,225 @@ class GitHubReviewProcessor:
             )
             return True
 
+        return self._review_pull_request(
+            repository=repository,
+            pull_request=pull_request,
+            token=token,
+            installation_id=installation_id,
+            check_run_id=check_run_id,
+        )
+
+    def _process_ci_event(self, job: WebhookJob) -> bool:
+        """Re-review open pull requests when a required check on their head finishes."""
+        repository, token, installation_id = self._authenticated_repository(job.payload)
+        full_name = str(repository["full_name"])
+        head_sha, check_name, hinted_numbers = _ci_event_facts(
+            job.event_name, job.payload
+        )
         try:
+            _, config = self._load_policy(
+                full_name, str(repository["default_branch"]), token
+            )
+        except RepositoryConfigurationError:
+            return False
+        if check_name not in config.required_ci:
+            return False
+
+        reviewed = False
+        for pull_request in self._open_pull_requests_for_sha(
+            full_name, head_sha, hinted_numbers, token
+        ):
+            if pull_request.get("draft"):
+                continue
+            open_run = self._open_check_run(full_name, head_sha, token)
+            if open_run is None and self._ci_state_already_reviewed(
+                repository, pull_request, config.required_ci, token
+            ):
+                continue
+            check_run_id = (
+                int(open_run["id"])
+                if open_run
+                else self._create_check_run(
+                    full_name, pull_request, job.delivery_id, token
+                )
+            )
+            self._review_pull_request(
+                repository=repository,
+                pull_request=pull_request,
+                token=token,
+                installation_id=installation_id,
+                check_run_id=check_run_id,
+            )
+            reviewed = True
+        return reviewed
+
+    def _process_ci_wait_expiry(self, job: WebhookJob) -> bool:
+        """Conclude a Check Run that is still waiting when its timer fires."""
+        repository, token, installation_id = self._authenticated_repository(job.payload)
+        full_name = str(repository["full_name"])
+        head_sha = str(job.payload["head_sha"])
+        open_run = self._open_check_run(full_name, head_sha, token)
+        if open_run is None or int(open_run["id"]) != int(job.payload["check_run_id"]):
+            return False
+        pull_request = self.client.get_pull_request(
+            full_name, int(job.payload["number"]), token
+        )
+        if (
+            pull_request.get("state") != "open"
+            or str(pull_request["head"]["sha"]) != head_sha
+            or pull_request.get("draft")
+        ):
+            self.client.update_check_run(
+                full_name,
+                int(open_run["id"]),
+                token,
+                conclusion="neutral",
+                title="No longer waiting for CI",
+                summary="The pull request was closed, updated, or returned to draft.",
+            )
+            return False
+        return self._review_pull_request(
+            repository=repository,
+            pull_request=pull_request,
+            token=token,
+            installation_id=installation_id,
+            check_run_id=int(open_run["id"]),
+            ci_wait_expired=True,
+        )
+
+    def _authenticated_repository(
+        self, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], str, int]:
+        identity = payload.get("repository") or {}
+        repository_id = int(identity.get("id") or 0)
+        installation_id = int((payload.get("installation") or {}).get("id") or 0)
+        if not repository_id or not installation_id:
+            raise ValueError(
+                "GitHub webhook is missing repository or installation identity"
+            )
+        token = self.client.installation_token(installation_id, repository_id)
+        repository = self.client.get_repository(str(identity["full_name"]), token)
+        if int(repository["id"]) != repository_id:
+            raise ValueError(
+                "GitHub repository identity changed during review preparation"
+            )
+        return repository, token, installation_id
+
+    def _create_check_run(
+        self,
+        full_name: str,
+        pull_request: dict[str, Any],
+        external_id: str,
+        token: str,
+    ) -> int:
+        check = self.client.create_check_run(
+            full_name,
+            token,
+            head_sha=str(pull_request["head"]["sha"]),
+            details_url=pull_request.get("html_url"),
+            external_id=external_id,
+        )
+        return int(check["id"])
+
+    def _open_check_run(
+        self, full_name: str, head_sha: str, token: str
+    ) -> dict[str, Any] | None:
+        """Find this app's unfinished Check Run, so a re-review continues it."""
+        app_id = self.client.settings.app_id
+        for check in self.client.list_check_runs(full_name, head_sha, token):
+            if (
+                check.get("name") == CHECK_NAME
+                and check.get("status") != "completed"
+                and str((check.get("app") or {}).get("id")) == app_id
+            ):
+                return check
+        return None
+
+    def _open_pull_requests_for_sha(
+        self,
+        full_name: str,
+        head_sha: str,
+        hinted_numbers: list[int],
+        token: str,
+    ) -> list[dict[str, Any]]:
+        # Check payloads list no pull requests for fork branches, and status payloads
+        # never do, so fall back to searching the open pull requests.
+        pull_requests = (
+            [
+                self.client.get_pull_request(full_name, number, token)
+                for number in hinted_numbers
+            ]
+            if hinted_numbers
+            else self.client.list_open_pull_requests(full_name, token)
+        )
+        return [
+            pull_request
+            for pull_request in pull_requests
+            if pull_request.get("state") == "open"
+            and str(pull_request["head"]["sha"]) == head_sha
+        ]
+
+    def _ci_state_already_reviewed(
+        self,
+        repository: dict[str, Any],
+        pull_request: dict[str, Any],
+        required_ci: list[str],
+        token: str,
+    ) -> bool:
+        head_sha = str(pull_request["head"]["sha"])
+        repository_key = f"github:{_repository_origin(repository)}:{repository['id']}"
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT request_payload FROM review_runs
+                WHERE provider = 'github' AND repository_key = %s
+                  AND external_id = %s AND head_sha = %s
+                """,
+                (repository_key, str(pull_request["number"]), head_sha),
+            )
+            row = cursor.fetchone()
+        if not row:
+            return False
+        reviewed = row[0].get("metadata", {}).get("ci_checks", {})
+        current = self._ci_checks(str(repository["full_name"]), head_sha, token)
+        return all(reviewed.get(name) == current.get(name) for name in required_ci)
+
+    def _review_pull_request(
+        self,
+        *,
+        repository: dict[str, Any],
+        pull_request: dict[str, Any],
+        token: str,
+        installation_id: int,
+        check_run_id: int,
+        ci_wait_expired: bool = False,
+    ) -> bool:
+        full_name = str(repository["full_name"])
+        head_sha = str(pull_request["head"]["sha"])
+        try:
+            config_blob, config = self._load_policy(
+                full_name, str(repository["default_branch"]), token
+            )
+            ci_checks = self._ci_checks(full_name, head_sha, token)
+            waiting = _waiting_required_checks(config.required_ci, ci_checks)
+            if waiting and not ci_wait_expired:
+                self._wait_for_ci(
+                    repository,
+                    pull_request,
+                    installation_id,
+                    check_run_id,
+                    waiting,
+                    token,
+                )
+                return True
             review_request, profile_id = self._prepare_review(
                 repository=repository,
                 pull_request=pull_request,
                 token=token,
                 installation_external_id=installation_id,
+                config_blob=config_blob,
+                config=config,
+                ci_checks=ci_checks,
             )
         except RepositoryConfigurationError as exc:
             self.client.update_check_run(
@@ -432,7 +696,22 @@ class GitHubReviewProcessor:
             )
             return True
 
-        result = self.review_service.review(review_request, profile_id=profile_id)
+        if waiting:
+            result = self.review_service.escalate(
+                review_request,
+                profile_id,
+                title="Required CI did not finish in time",
+                detail=(
+                    "These required checks did not finish within "
+                    f"{self.client.settings.ci_wait_timeout_seconds} seconds: "
+                    + ", ".join(waiting)
+                ),
+                evidence=[
+                    f"{name}={ci_checks.get(name, 'missing')}" for name in waiting
+                ],
+            )
+        else:
+            result = self.review_service.review(review_request, profile_id=profile_id)
         self._persist_result(review_request, result)
         self.client.update_check_run(
             full_name,
@@ -445,20 +724,58 @@ class GitHubReviewProcessor:
         )
         return True
 
+    def _wait_for_ci(
+        self,
+        repository: dict[str, Any],
+        pull_request: dict[str, Any],
+        installation_id: int,
+        check_run_id: int,
+        waiting: list[str],
+        token: str,
+    ) -> None:
+        # Keyed by Check Run, so each wait gets exactly one durable timer.
+        self.queue.enqueue(
+            provider="github",
+            delivery_id=f"ci-wait:{check_run_id}",
+            event_name=CI_WAIT_EVENT,
+            payload={
+                "repository": {
+                    "id": repository["id"],
+                    "full_name": repository["full_name"],
+                },
+                "installation": {"id": installation_id},
+                "number": pull_request["number"],
+                "head_sha": pull_request["head"]["sha"],
+                "check_run_id": check_run_id,
+            },
+            delay_seconds=self.client.settings.ci_wait_timeout_seconds,
+        )
+        self.client.update_check_run_progress(
+            str(repository["full_name"]),
+            check_run_id,
+            token,
+            title="Waiting for required CI",
+            summary="Waiting for: " + ", ".join(waiting),
+        )
+
     def mark_terminal_failure(self, job: WebhookJob, error: Exception) -> None:
-        if not job.external_result_id or job.event_name != "pull_request":
-            return
         try:
-            normalized = normalize_github_event(job.event_name, job.payload)
+            identity = job.payload["repository"]
+            full_name = str(identity["full_name"])
             token = self.client.installation_token(
-                int(normalized.installation_id or 0),
-                int(normalized.repository_external_id),
+                int(job.payload["installation"]["id"]), int(identity["id"])
             )
+            check_run_id = job.external_result_id
+            if not check_run_id:
+                open_run = self._open_check_run(full_name, _job_head_sha(job), token)
+                check_run_id = open_run["id"] if open_run else None
+            if not check_run_id:
+                return
             self.client.update_check_run(
-                normalized.repository,
-                int(job.external_result_id),
+                full_name,
+                int(check_run_id),
                 token,
-                conclusion="neutral",
+                conclusion="action_required",
                 title="RepoMonster could not complete the review",
                 summary="The review failed after all retry attempts. Maintainer review is required.",
                 text=f"{type(error).__name__}: {error}"[:4000],
@@ -468,6 +785,18 @@ class GitHubReviewProcessor:
             # publication of the terminal state.
             return
 
+    def _load_policy(
+        self, full_name: str, default_branch: str, token: str
+    ) -> tuple[dict[str, Any], RepositoryConfig]:
+        config_blob = self._load_config_blob(full_name, default_branch, token)
+        config_content = _decode_github_content(config_blob)
+        try:
+            return config_blob, load_repository_config(config_content)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryConfigurationError(
+                f"Invalid `.repomonster.yml`: {exc}"
+            ) from exc
+
     def _prepare_review(
         self,
         *,
@@ -475,17 +804,12 @@ class GitHubReviewProcessor:
         pull_request: dict[str, Any],
         token: str,
         installation_external_id: int,
+        config_blob: dict[str, Any],
+        config: RepositoryConfig,
+        ci_checks: dict[str, str],
     ) -> tuple[ReviewRequest, str]:
         full_name = str(repository["full_name"])
         default_branch = str(repository["default_branch"])
-        config_blob = self._load_config_blob(full_name, default_branch, token)
-        config_content = _decode_github_content(config_blob)
-        try:
-            config = load_repository_config(config_content)
-        except (TypeError, ValueError) as exc:
-            raise RepositoryConfigurationError(
-                f"Invalid `.repomonster.yml`: {exc}"
-            ) from exc
 
         sources = self._load_knowledge_sources(
             full_name=full_name,
@@ -507,7 +831,6 @@ class GitHubReviewProcessor:
         )
         language, framework, standard_packs = _select_stack(config, changed_files)
         head_sha = str(pull_request["head"]["sha"])
-        ci_checks = self._ci_checks(full_name, head_sha, token)
 
         with self._connect() as connection:
             installation_db_id = self._upsert_installation(
@@ -941,12 +1264,40 @@ def _language_for_path(path: str) -> str | None:
     }.get(suffix)
 
 
+def _ci_event_facts(
+    event_name: str, payload: dict[str, Any]
+) -> tuple[str, str, list[int]]:
+    if event_name == "check_run":
+        check_run = payload["check_run"]
+        numbers = [int(item["number"]) for item in check_run.get("pull_requests") or []]
+        return str(check_run["head_sha"]), str(check_run["name"]), numbers
+    return str(payload["sha"]), str(payload["context"]), []
+
+
+def _job_head_sha(job: WebhookJob) -> str:
+    if job.event_name == "pull_request":
+        return str(job.payload["pull_request"]["head"]["sha"])
+    if job.event_name == CI_WAIT_EVENT:
+        return str(job.payload["head_sha"])
+    return _ci_event_facts(job.event_name, job.payload)[0]
+
+
+def _waiting_required_checks(
+    required_ci: list[str], ci_checks: dict[str, str]
+) -> list[str]:
+    return [
+        name
+        for name in required_ci
+        if ci_checks.get(name, "missing").lower() in CI_WAITING_STATES
+    ]
+
+
 def _check_conclusion(state: GateState) -> str:
+    # GitHub treats `neutral` as passing for required checks, so anything short of
+    # ready, including an escalation, has to fail closed.
     if state == GateState.READY_FOR_HUMAN_REVIEW:
         return "success"
-    if state in {GateState.BLOCKED, GateState.NEEDS_AUTHOR_UPDATES}:
-        return "action_required"
-    return "neutral"
+    return "action_required"
 
 
 def _check_title(state: GateState) -> str:
