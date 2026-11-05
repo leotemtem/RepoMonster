@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 from harness import (
     DEFAULT_REQUIRED_CI,
@@ -13,6 +15,20 @@ from harness import (
 
 
 class ReviewFlowTests(EndToEndTestCase):
+    def test_gitlab_webhook_route_is_closed(self) -> None:
+        request = urlrequest.Request(
+            f"{self.api_url}/webhooks/gitlab",
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+        with self.assertRaises(urlerror.HTTPError) as raised:
+            with urlrequest.urlopen(request, timeout=10):  # nosec B310 - local API.
+                pass
+
+        self.assertEqual(raised.exception.code, 404)
+
     def test_ready_pull_request_publishes_success(self) -> None:
         self.github.set_ci(DEFAULT_REQUIRED_CI)
 

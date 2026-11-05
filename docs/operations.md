@@ -247,7 +247,7 @@ location / {
 
 The public endpoint must preserve the webhook request body. Do not cache `/webhooks/*`, and do not place interactive browser challenges in front of `/webhooks/github`. Cloudflare does not replace GitHub HMAC verification.
 
-The GitLab route is normalization-only and does not yet verify a GitLab secret. Do not treat it as a production integration; deny `/webhooks/gitlab` at the reverse proxy until the adapter is implemented. Protect or disable FastAPI's `/docs` and `/openapi.json` routes if API discovery should not be public.
+GitLab has event normalization code but no HTTP route; `POST /webhooks/gitlab` returns 404 until GitLab support ships. Protect or disable FastAPI's `/docs` and `/openapi.json` routes if API discovery should not be public.
 
 Use a valid origin certificate when Cloudflare SSL mode is Full (strict). A Cloudflare 526 indicates origin certificate validation failure; a 502 commonly indicates that Nginx cannot reach the API container or the containers do not share a network.
 
