@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native Claude insight provider selected explicitly with `INSIGHT_PROVIDER=anthropic`,
+  using the optional official Anthropic SDK, structured output, server-side default
+  fallbacks and bounded retries. Refusals and invalid or incomplete output fail
+  safely; existing provider selection and defaults are preserved.
+
 - Cache repository knowledge by default-branch tree and embedding settings, with
   default-branch push refreshes. Review policy and linked issues remain current
   on cache hits. Adds migration `006_knowledge_cache.sql`; GitHub Apps should

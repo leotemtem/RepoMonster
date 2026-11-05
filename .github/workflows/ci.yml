@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install uv==0.11.28
-          uv sync --frozen --extra db --extra web
+          uv sync --frozen --extra db --extra web --extra anthropic
 
       - name: Run service-free unit tests
         env:
@@ -53,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install uv==0.11.28
-          uv sync --frozen --extra db --extra web
+          uv sync --frozen --extra db --extra web --extra anthropic
 
       - name: Run service-free integration tests
         run: uv run --frozen python -m unittest discover -s tests_integration
@@ -76,7 +76,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install uv==0.11.28
-          uv sync --frozen --extra db --extra web --extra dev
+          uv sync --frozen --extra db --extra web --extra anthropic --extra dev
 
       - name: Run lint checks
         run: |
@@ -136,7 +136,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install uv==0.11.28
-          uv sync --frozen --extra db --extra web
+          uv sync --frozen --extra db --extra web --extra anthropic
 
       - name: Run end-to-end tests including the demo Compose stack
         run: uv run --frozen python -m unittest discover -s tests_e2e

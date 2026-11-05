@@ -74,9 +74,11 @@ database roles, observability and cost before choosing that architecture.
 
 ## Phase 2: Claude and OpenAI providers
 
-- [ ] **2.1 Schema compatibility.** Remove `maxItems` from `FINDINGS_RESPONSE_FORMAT`, lower-case `recommendation` before parsing, and treat `refusal` and `max_tokens` stop reasons as explicit errors. Keep the evidence truncation in code.
+- [x] **2.1 Schema compatibility.** Remove `maxItems` from `FINDINGS_RESPONSE_FORMAT`, lower-case `recommendation` before parsing, and treat `refusal` and `max_tokens` stop reasons as explicit errors. Keep the evidence truncation in code.
 - [ ] **2.2 Provider selection.** `INSIGHT_PROVIDER` (`anthropic` default, `openai`, `openai_compatible`) and `EMBEDDING_PROVIDER` (`voyage` default, `openai`, `openai_compatible`), resolved in the service factory from 0.6.
-- [ ] **2.3 Anthropic adapter.** Official `anthropic` SDK, Messages API with `output_config.format` JSON schema, SDK retries enabled, prompt caching on the system prompt and standards block. Transient errors raise to the job queue (closes F6).
+    - `INSIGHT_PROVIDER` is done, but Claude must be selected explicitly rather than being the default, so credentials alone never start paid calls. `EMBEDDING_PROVIDER` remains open.
+- [x] **2.3 Anthropic adapter.** Official `anthropic` SDK, Messages API with `output_config.format` JSON schema, SDK retries enabled, prompt caching on the system prompt and standards block. Transient errors raise to the job queue (closes F6).
+    - Done without prompt caching, which stays open under 2.5. A live API call is still needed; see item 1.4.
 - [ ] **2.4 Voyage and OpenAI adapters.** `voyageai` SDK for embeddings with `input_type=document` for packs and knowledge and `input_type=query` for the review query, batched at up to 1,000 texts per request. Update `.env.example` to `EMBEDDING_PROVIDER=voyage`, `EMBEDDING_MODEL=voyage-4`, `EMBEDDING_DIMENSIONS=1024`. Official OpenAI SDK for chat and embeddings as the alternative.
     - Done when: a fresh database bootstraps at 1024 dimensions and `standards reindex` succeeds against Voyage.
 - [ ] **2.5 Contract tests and comparison.** Recorded-response tests per adapter. A small fixture set of PRs with expected gate outcomes to compare models before switching defaults.

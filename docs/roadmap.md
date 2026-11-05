@@ -81,28 +81,47 @@ demonstration setup, not a production service. See the [demo runbook](operations
 AWS hosting, Terraform, RDS, Secrets Manager, ECR and hosted deployment pipelines
 are deferred until there is a reason to host the service. Revisit costs,
 observability, database roles and deployment security at that point. The model
-provider work below remains a later phase; the demo uses the existing
-OpenAI-compatible adapters.
+demo can use the native Claude adapter and, for embeddings, Voyage through the
+OpenAI-compatible client, both described below.
 
 ## Phase 2: Claude and OpenAI providers
 
-Add native adapters behind the existing `InsightProvider` and `EmbeddingProvider` protocols, chosen by environment variable. Claude is the default review model, called through the official `anthropic` SDK. Keep the current OpenAI-compatible adapter for local models. Do not route Claude through Anthropic's OpenAI-compatible endpoint: Anthropic describes it as intended for testing and comparison, not production ([docs](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)).
+Native adapters sit behind the existing `InsightProvider` and `EmbeddingProvider`
+protocols. Status:
 
-| Setting | Values | Notes |
+- [x] Native Anthropic insight adapter through the official SDK, shared findings
+  schema/parser, structured output, effort, server-side default fallbacks, bounded
+  retries, and real-SDK local HTTP contract tests including service gate outcomes.
+- [ ] Native OpenAI insight and embedding adapters through the official SDK.
+- [ ] Native Voyage embedding adapter, including separate document/query `input_type`.
+- [ ] Prompt caching and fixture-based model comparison.
+
+Claude requires explicit `INSIGHT_PROVIDER=anthropic`. Unset/empty retains the
+existing behavior: `INSIGHT_BASE_URL` enables the OpenAI-compatible adapter;
+otherwise only deterministic checks run. Claude credentials alone never enable
+paid requests. `openai` is not yet a supported provider value.
+
+| Setting | Current values | Notes |
 | --- | --- | --- |
-| `INSIGHT_PROVIDER` | `anthropic` (default), `openai`, `openai_compatible` | `anthropic` uses the Messages API with `output_config.format` (GA, no beta header). `openai` uses the official SDK with a strict `json_schema`. |
-| `ANTHROPIC_API_KEY` | secret | From Secrets Manager on AWS, `.env` locally. |
-| `EMBEDDING_PROVIDER` | `voyage` (default), `openai`, `openai_compatible` | Anthropic has no embedding model and recommends Voyage AI ([docs](https://platform.claude.com/docs/en/build-with-claude/embeddings)). Default model `voyage-4`: 32K-token context, up to 1,000 texts per request ([docs](https://docs.voyageai.com/docs/embeddings)). Embed knowledge with `input_type=document` and the review query with `input_type=query`. |
-| `VOYAGE_API_KEY` | secret | Voyage pricing is $0.06 per 1M tokens for `voyage-4`, with 200M free tokens ([pricing](https://docs.voyageai.com/docs/pricing)). |
-| `INSIGHT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | `EMBEDDING_DIMENSIONS=1024` | `voyage-4` offers 256, 512, 1024 (default) or 2048. Use 1024: pgvector's HNSW index on the `vector` type is limited to 2,000 dimensions, which rules out 2048. A new database takes the value at its first migration; the existing 1536 Compose database needs recreating or a migration plus full reindex. |
+| `INSIGHT_PROVIDER` | `anthropic`, `openai_compatible`, unset/empty | Claude uses beta Messages with `output_config.format` and `fallbacks="default"` under `server-side-fallback-2026-07-01`. |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | operator secrets | SDK environment resolution; the API key takes precedence. |
+| `INSIGHT_MODEL` | Claude default `claude-opus-5-5` | OpenAI-compatible still requires its model identifier. |
+| `INSIGHT_EFFORT` | `low`, `medium`, `high` (default), `xhigh`, `max` | Claude only. |
+| `INSIGHT_MAX_TOKENS`, `INSIGHT_TIMEOUT_SECONDS` | Claude defaults `16000`, `300` | Existing OpenAI-compatible defaults are unchanged. |
 
-Three changes are needed in `insights.py` before the Anthropic adapter will work:
+The shared schema no longer uses `maxItems`; evidence remains capped at 20 items
+in the parser. Recommendation parsing strips whitespace and normalizes case.
+Claude refusals, incomplete output, invalid JSON/findings, and SDK errors escalate
+safely after applicable SDK retries. Only text after the last fallback block is
+used; no gate policy has changed.
 
-- **Drop `maxItems: 20` from the findings schema.** Claude structured outputs reject `maxItems` with a 400 ([docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)). The code already truncates evidence to 20, so nothing is lost.
-- **Lower-case the `recommendation` value before parsing.** Anthropic notes enum casing can differ from the schema; severity and impact are already lower-cased, recommendation is not.
-- **Handle `stop_reason` `refusal` and `max_tokens`** as retryable or escalating errors instead of a JSON parse failure.
-
-Both official SDKs retry 429 and 5xx responses with backoff, which also closes finding 6 for model calls. The Anthropic SDK supports prompt caching, which suits the fixed system prompt and repeated standards text in each brief. Add recorded-response contract tests for each adapter, plus the fixture-based model comparison outlined in [`harness-capabilities.md`](harness-capabilities.md).
+Voyage should work through the existing OpenAI-compatible embedding client with
+`EMBEDDING_BASE_URL=https://api.voyageai.com/v1`, `EMBEDDING_MODEL=voyage-4`,
+`EMBEDDING_DIMENSIONS=1024`, and your own key in `EMBEDDING_API_KEY`, without
+`input_type`. This has not yet been run against the live API. A native adapter
+remains future work. Changing the existing 1536-dimensional Compose database
+requires recreation or a migration and full reindex. See the
+[operations guide](operations.md#insight-endpoint) for current provider settings.
 
 ## Phase 3: per-PR security gate
 

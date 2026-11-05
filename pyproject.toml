@@ -11,6 +11,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+anthropic = [
+  "anthropic>=2,<3",
+]
 db = [
   "psycopg[binary]>=3.2,<4.0",
   "psycopg_pool>=3.2,<4.0",
