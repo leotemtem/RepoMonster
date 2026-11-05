@@ -48,6 +48,7 @@ class RepositoryKnowledgeSynchronizer:
         config: RepositoryConfig,
         sources: list[RepositorySource],
         installation_id: int | None = None,
+        knowledge_sync_key: str | None = None,
     ) -> int:
         repository_id = self._upsert_repository(
             provider,
@@ -80,6 +81,11 @@ class RepositoryKnowledgeSynchronizer:
             )
         for source in sources:
             self._sync_source(repository_id, repository_key, source, scope="repo")
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE repositories SET knowledge_sync_key = %s WHERE id = %s",
+                (knowledge_sync_key, repository_id),
+            )
         return repository_id
 
     def sync_task_sources(
@@ -102,6 +108,31 @@ class RepositoryKnowledgeSynchronizer:
                 scope="task",
                 task_key=task_key,
             )
+
+    def sync_policy(
+        self, repository_key: str, config_sha: str, config: RepositoryConfig
+    ) -> None:
+        """Keep policy current even when repository knowledge is cached."""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE repositories
+                SET config_sha = %s, review_settings = %s::jsonb,
+                    model_profile = %s, updated_at = now()
+                WHERE repository_key = %s AND config_sha IS DISTINCT FROM %s
+                RETURNING id
+                """,
+                (
+                    config_sha,
+                    json.dumps(config.review_settings),
+                    config.model_profile,
+                    repository_key,
+                    config_sha,
+                ),
+            )
+            row = cursor.fetchone()
+        if row is not None:
+            self._sync_pack_selections(int(row[0]), config)
 
     def _upsert_repository(
         self,

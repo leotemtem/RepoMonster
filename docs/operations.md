@@ -195,8 +195,12 @@ Subscribe to:
 - Pull request
 - Check run
 - Status
+- Push
 
 RepoMonster re-reviews a pull request when one of its required checks finishes, so without the check run and status events a pull request waiting on CI only concludes when `CI_WAIT_TIMEOUT_SECONDS` runs out.
+
+Default-branch pushes refresh cached repository knowledge without publishing a
+Check Run. Pushes to other branches and branch deletions are ignored.
 
 GitHub sends the `ping` event automatically when the webhook is configured. RepoMonster acknowledges it without queuing a review. Other event types are currently ignored by the GitHub webhook route.
 
