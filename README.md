@@ -158,10 +158,10 @@ Bundled packs are imported into PostgreSQL during bootstrap. Production reviews 
 python3 -m pip install uv==0.11.28
 uv sync --frozen --extra db --extra web --extra dev
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests
-PYTHONPATH=src uv run --frozen review-gate examples/review_request.json
+PYTHONPATH=src uv run --frozen repomonster review examples/review_request.json
 ```
 
-The local `review-gate` simulation reads bundled pack files and runs deterministic checks without PostgreSQL or a language model. It is useful for policy development but is not equivalent to the production GitHub workflow.
+The local `repomonster review` simulation reads bundled pack files and runs deterministic checks without PostgreSQL or a language model. It is useful for policy development but is not equivalent to the production GitHub workflow.
 
 ## Security model
 

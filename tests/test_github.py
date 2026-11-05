@@ -4,11 +4,11 @@ import base64
 import unittest
 from pathlib import Path
 
-from review_gatekeeper.config import load_repository_config
-from review_gatekeeper.github import GitHubSettings, verify_webhook_signature
-from review_gatekeeper.github.processor import _decode_github_content, _select_stack
-from review_gatekeeper.github.publish import _escape_markdown, _terminal_error_code
-from review_gatekeeper.models import ChangedFile
+from repomonster.config import load_repository_config
+from repomonster.github import GitHubSettings, verify_webhook_signature
+from repomonster.github.processor import _decode_github_content, _select_stack
+from repomonster.github.publish import _escape_markdown, _terminal_error_code
+from repomonster.models import ChangedFile
 
 
 class GitHubIntegrationTests(unittest.TestCase):

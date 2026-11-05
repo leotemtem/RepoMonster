@@ -30,11 +30,17 @@ class RequestSizeTests(EndToEndTestCase):
                 "Authorization": authorization,
             },
         )
-        try:
-            with urlrequest.urlopen(request, timeout=10) as response:  # nosec B310
-                return response.status, response.read()
-        except urlerror.HTTPError as exc:
-            return exc.code, exc.read()
+        # The API can answer before reading the body and then close the socket, so a
+        # client may see a reset instead of the response. Asking again is safe here.
+        for _ in range(5):
+            try:
+                with urlrequest.urlopen(request, timeout=10) as response:  # nosec B310
+                    return response.status, response.read()
+            except urlerror.HTTPError as exc:
+                return exc.code, exc.read()
+            except ConnectionResetError:
+                continue
+        self.fail("The API kept resetting the connection")
 
     def test_declared_oversized_bodies_are_rejected(self) -> None:
         body = b"x" * 2000

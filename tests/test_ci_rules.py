@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from review_gatekeeper.models import ReviewProfile, ReviewRequest
-from review_gatekeeper.rules import RuleEngine
+from repomonster.models import ReviewProfile, ReviewRequest
+from repomonster.rules import RuleEngine
 
 
 class RequiredCiRuleTests(unittest.TestCase):

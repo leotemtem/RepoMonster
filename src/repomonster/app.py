@@ -116,14 +116,10 @@ def create_app() -> Any:
         finally:
             pool.close()
 
-    app = FastAPI(title="Review Gatekeeper", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="RepoMonster", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         BodyLimitMiddleware, max_bytes=int(os.getenv("MAX_WEBHOOK_BYTES", "2000000"))
     )
-
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

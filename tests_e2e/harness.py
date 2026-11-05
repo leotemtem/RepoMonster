@@ -581,7 +581,7 @@ class _Postgres:
         fake = FakeGitHub()
         try:
             subprocess.run(
-                [sys.executable, "-m", "review_gatekeeper.management", "bootstrap"],
+                [sys.executable, "-m", "repomonster.management", "bootstrap"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -685,7 +685,7 @@ class EndToEndTestCase(unittest.TestCase):
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "review_gatekeeper.app:create_app",
+                "repomonster.app:create_app",
                 "--factory",
                 "--host",
                 "127.0.0.1",
@@ -699,7 +699,7 @@ class EndToEndTestCase(unittest.TestCase):
 
     def start_worker(self, name: str = "worker") -> None:
         self.start_process(
-            name, [sys.executable, "-m", "review_gatekeeper.management", "worker"]
+            name, [sys.executable, "-m", "repomonster.management", "worker"]
         )
 
     def start_process(self, name: str, command: list[str]) -> None:

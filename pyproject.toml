@@ -28,8 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-repomonster = "review_gatekeeper.management:main"
-review-gate = "review_gatekeeper.cli:main"
+repomonster = "repomonster.management:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

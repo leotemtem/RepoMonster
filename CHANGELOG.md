@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed the Python package from `review_gatekeeper` to `repomonster` and the
+  FastAPI title to `RepoMonster`. Replaced the removed `review-gate` command with
+  `repomonster review <review_request.json>`. Removed `/health`; use `/healthz`
+  for process liveness.
+
 - Split the GitHub adapter into client, processor and Check Run formatting modules,
   preserving existing public imports and behavior.
 

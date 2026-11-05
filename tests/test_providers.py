@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from review_gatekeeper.providers import normalize_github_event, normalize_gitlab_event
+from repomonster.providers import normalize_github_event, normalize_gitlab_event
 
 
 class ProviderNormalizationTests(unittest.TestCase):

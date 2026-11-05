@@ -322,7 +322,7 @@ curl http://127.0.0.1:8000/readyz
 curl https://your-host.example/readyz
 ```
 
-- `/health` and `/healthz` report process health.
+- `/healthz` reports process health.
 - `/readyz` checks database access and counts ready standard packs.
 - `/` intentionally returns 404; RepoMonster does not currently serve a website.
 
@@ -720,7 +720,7 @@ repomonster repository sync-local /path/to/checkout \
   --provider-base-url https://github.com \
   --external-id 123456 \
   --full-name owner/repository
-review-gate examples/review_request.json
+repomonster review examples/review_request.json
 ```
 
 - `db migrate` applies pending schema migrations only.
@@ -729,7 +729,7 @@ review-gate examples/review_request.json
 - `bootstrap` runs migration followed by standard synchronization.
 - `worker` starts the long-running queue consumer used by Compose.
 - `repository sync-local` indexes one trusted local checkout for development or operator-controlled onboarding.
-- `review-gate` runs the offline deterministic fixture path and does not use PostgreSQL.
+- `repomonster review` runs the offline deterministic fixture path and does not use PostgreSQL.
 
 ## Stopping and restarting
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from review_gatekeeper.models import ReviewProfile, ReviewRequest
-from review_gatekeeper.repository import (
+from repomonster.models import ReviewProfile, ReviewRequest
+from repomonster.repository import (
     OpenAICompatibleEmbeddingProvider,
     PostgresStandardsRepository,
     _vector_literal,

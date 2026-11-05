@@ -3,10 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from review_gatekeeper.models import ChangedFile, ReviewProfile, ReviewRequest
-from review_gatekeeper.repository import BundledPackRepository
-from review_gatekeeper.rules import RuleEngine
-from review_gatekeeper.service import ReviewService
+from repomonster.models import ChangedFile, ReviewProfile, ReviewRequest
+from repomonster.repository import BundledPackRepository
+from repomonster.rules import RuleEngine
+from repomonster.service import ReviewService
 
 
 def build_service() -> ReviewService:

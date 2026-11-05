@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from harness import EMBEDDING_DIMENSIONS, FULL_NAME, EndToEndTestCase
 
-from review_gatekeeper.repository import OpenAICompatibleEmbeddingProvider
+from repomonster.repository import OpenAICompatibleEmbeddingProvider
 
 
 class HTTPClientTests(EndToEndTestCase):

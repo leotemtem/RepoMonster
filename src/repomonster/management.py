@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from .cli import main as review_main
 from .config import load_repository_config
 from .database import DatabaseMigrator, database_connect_timeout, project_root
 from .factory import build_review_service
@@ -287,6 +288,8 @@ def _worker() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="repomonster")
     commands = parser.add_subparsers(dest="command", required=True)
+    review = commands.add_parser("review")
+    review.add_argument("review_request", type=Path)
     db = commands.add_parser("db")
     db_commands = db.add_subparsers(dest="db_command", required=True)
     db_commands.add_parser("migrate")
@@ -315,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.command == "review":
+        return review_main([str(args.review_request)])
     if args.command == "db" and args.db_command == "migrate":
         return _migrate()
     if args.command == "standards":

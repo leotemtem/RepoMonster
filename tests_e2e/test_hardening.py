@@ -20,7 +20,7 @@ from harness import (
     repository_config,
 )
 
-from review_gatekeeper.github import GitHubClient, GitHubSettings
+from repomonster.github import GitHubClient, GitHubSettings
 
 
 def model_response(
@@ -65,7 +65,7 @@ class HardeningTests(EndToEndTestCase):
         self, *arguments: str, environment: dict | None = None
     ) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "review_gatekeeper.management", *arguments],
+            [sys.executable, "-m", "repomonster.management", *arguments],
             env=environment or self.environment,
             capture_output=True,
             text=True,
