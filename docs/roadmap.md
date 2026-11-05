@@ -12,8 +12,8 @@ What passed: 43 unit tests and 1 integration test, mypy on all 17 files, Bandit,
 
 Order of work, each phase shipping on its own:
 
-1. **Phase 0, streamline:** fix the bug and remove the duplication. The AWS port touches the same seams, so doing this first makes the port smaller.
-2. **Phase 1, AWS service:** ECS Fargate, RDS PostgreSQL with pgvector, Secrets Manager, Terraform.
+1. **Phase 0, streamline:** fix the bug and remove the duplication before demonstrating the complete workflow.
+2. **Phase 1, no-cost local demo:** Docker Compose and a free Cloudflare Quick Tunnel on the owner's machine. AWS is deferred until there is a reason to host the service.
 3. **Phase 2, model providers:** native Anthropic (Claude) and OpenAI adapters, replacing the Tailscale-reached local model.
 4. **Phase 3, security gate:** deterministic dependency and image checks on every PR, prioritised by Cloudflare's Zero Wire briefings, plus Cloudflare's security-audit-skill for deeper audits.
 5. **Phase 4, verification sandbox and attack-pattern library:** reproduce a finding on the base commit, confirm the fix on the head commit, and record recurring patterns.
@@ -22,15 +22,15 @@ Order of work, each phase shipping on its own:
 
 | Decision | Choice | Status |
 | --- | --- | --- |
-| Infrastructure as code | Terraform | Decided |
-| Model access | Claude through the Anthropic API with an API key (stored in Secrets Manager) | Decided |
+| Infrastructure | Docker Compose for the local demo; Terraform deferred with AWS hosting | Decided |
+| Model access | Claude through the Anthropic API with an API key (local operator configuration; Secrets Manager if later hosted on AWS) | Decided |
 | Embeddings | Voyage AI `voyage-4` at 1024 dimensions (Anthropic has no embedding model) | Decided |
-| Hosting model | Single-tenant on the owner's AWS account in eu-west-2, built so it can go multi-tenant later | Decided |
+| Hosting model | No-cost local demo through a Cloudflare Quick Tunnel; AWS deferred until hosting is needed | Decided |
 | Code delivery | Branches and PRs on `leotemtem/repomonster` | Decided |
 
 ## Audit findings
 
-Fix finding 1 before anything else: a PR opened while its required CI is still running is marked Blocked and is never re-reviewed when CI finishes. The rest are streamlining items the AWS port depends on.
+Fix finding 1 before anything else: a PR opened while its required CI is still running is marked Blocked and is never re-reviewed when CI finishes. The rest are streamlining items for the demo and any later hosted deployment.
 
 | # | Severity | Finding | Where | Fix |
 | --- | --- | --- | --- | --- |
@@ -50,50 +50,39 @@ Fix finding 1 before anything else: a PR opened while its required CI is still r
 
 deptry also flags `uvicorn` as unused; that is a false positive, since the Docker `CMD` runs it.
 
-## Phase 1: AWS service
+## Phase 1: no-cost local demo
 
-Run the existing two-process design (API plus worker) as two ECS Fargate services in eu-west-2, backed by RDS PostgreSQL with pgvector. The PostgreSQL `SKIP LOCKED` queue carries over unchanged, so no new queue service is needed at this stage.
+Run the existing API, worker, bootstrap and PostgreSQL/pgvector services on the
+owner's machine with Docker Compose. A free Cloudflare Quick Tunnel supplies a
+temporary HTTPS URL without an account or domain. Caddy forwards only POST on the
+exact `/webhooks/github` path to the API, which still verifies the signature.
+The overlay publishes no host ports and removes the external `shared` network.
+The worker alone mounts the operator's App private key, read-only; cloudflared
+receives no application secrets.
 
 ```mermaid
 flowchart LR
-    GH[GitHub<br/>App webhooks and REST API]
-    LLM[Anthropic API<br/>Claude]
-    EMB[Voyage AI<br/>voyage-4 embeddings]
-    subgraph VPC[VPC, private subnets, eu-west-2]
-        ALB[ALB<br/>TLS, ACM certificate]
-        API[API service<br/>Fargate, verify and enqueue]
-        WRK[Worker service<br/>Fargate, runs reviews]
-        RDS[(RDS PostgreSQL 16<br/>pgvector and job queue)]
-        BOOT[Bootstrap task<br/>migrations, packs]
-        PLAT[Secrets Manager, ECR, CloudWatch<br/>through VPC endpoints]
+    GH[GitHub App webhook] --> T[Quick Tunnel, temporary HTTPS URL]
+    subgraph Local[Owner's machine, Docker Compose]
+        T --> C[Caddy, webhook route only] --> API[API, verify and enqueue]
+        API --> DB[(PostgreSQL, pgvector and queue)]
+        BOOT[Bootstrap] --> DB
+        DB --> WRK[Worker]
     end
-    GH -- webhooks over HTTPS --> ALB --> API
-    API -- enqueue --> RDS
-    WRK -- claim jobs --> RDS
-    BOOT -- migrate --> RDS
-    WRK -- Check Runs, PR data --> GH
-    WRK -- model calls --> LLM
-    WRK -- embeddings --> EMB
+    WRK --> GHA[GitHub REST API and Check Runs]
+    WRK --> MODEL[Configured OpenAI-compatible endpoints]
 ```
 
-The API only verifies and enqueues; the worker makes all GitHub and model calls, leaving through a NAT gateway.
+The machine must stay on. The URL changes each start, so the GitHub App webhook
+URL must be updated. Quick Tunnels have no uptime guarantee, and GitHub does not
+automatically retry failed webhook deliveries; redeliver them manually. This is a
+demonstration setup, not a production service. See the [demo runbook](operations.md#no-cost-local-demo).
 
-| Component | AWS service | Notes |
-| --- | --- | --- |
-| Webhook and review API | ECS Fargate service behind an ALB (HTTPS, ACM certificate) | ALB health check on `/healthz`, not `/readyz`, which queries the database. |
-| Review worker | ECS Fargate service, no inbound traffic | Scale on queue depth (a CloudWatch metric the worker publishes). SIGTERM handling already exists. |
-| Migrations and pack bootstrap | One-off ECS task run by the deploy pipeline | Replaces the Compose `bootstrap` service. |
-| Database | RDS PostgreSQL 16, Multi-AZ optional | RDS supports pgvector with HNSW indexes ([AWS](https://aws.amazon.com/about-aws/whats-new/2023/10/amazon-rds-postgresql-pgvector-hnsw-indexing/)). Needs the connection pool from finding 8. |
-| Secrets | Secrets Manager, injected through the task definition | GitHub App key, webhook secret, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`. Add `GITHUB_PRIVATE_KEY` (PEM in an env var) alongside the file path. |
-| Images | ECR with scan on push | Digest-pinned base image (finding 4). |
-| Logs and metrics | CloudWatch Logs, JSON log format | Add queue depth, review latency and model error rate. |
-| Infrastructure as code | Terraform | Modules: `network`, `data`, `compute`, `ci`. Remote state in S3 with locking. Deploy from GitHub Actions through OIDC, no long-lived AWS keys. |
-
-Code changes the port needs: the connection pool, the PEM-from-env option, JSON logging, and a metrics emitter. Everything else is configuration.
-
-To keep idle cost down, run tasks in private subnets with VPC endpoints for ECR, Secrets Manager and CloudWatch, plus a single NAT gateway for GitHub and model API traffic. Expect the ALB, NAT gateway and RDS instance to dominate the bill; check the [AWS Pricing Calculator](https://calculator.aws/) before committing.
-
-"As a service" means making the GitHub App public so other accounts can install it. Storage is already namespaced by installation and repository ID, so the remaining gaps are per-installation rate limits, usage metering, and an install and uninstall lifecycle. Phase 1 is single-tenant; those come later.
+AWS hosting, Terraform, RDS, Secrets Manager, ECR and hosted deployment pipelines
+are deferred until there is a reason to host the service. Revisit costs,
+observability, database roles and deployment security at that point. The model
+provider work below remains a later phase; the demo uses the existing
+OpenAI-compatible adapters.
 
 ## Phase 2: Claude and OpenAI providers
 
@@ -105,7 +94,7 @@ Add native adapters behind the existing `InsightProvider` and `EmbeddingProvider
 | `ANTHROPIC_API_KEY` | secret | From Secrets Manager on AWS, `.env` locally. |
 | `EMBEDDING_PROVIDER` | `voyage` (default), `openai`, `openai_compatible` | Anthropic has no embedding model and recommends Voyage AI ([docs](https://platform.claude.com/docs/en/build-with-claude/embeddings)). Default model `voyage-4`: 32K-token context, up to 1,000 texts per request ([docs](https://docs.voyageai.com/docs/embeddings)). Embed knowledge with `input_type=document` and the review query with `input_type=query`. |
 | `VOYAGE_API_KEY` | secret | Voyage pricing is $0.06 per 1M tokens for `voyage-4`, with 200M free tokens ([pricing](https://docs.voyageai.com/docs/pricing)). |
-| `INSIGHT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | `EMBEDDING_DIMENSIONS=1024` | `voyage-4` offers 256, 512, 1024 (default) or 2048. Use 1024: pgvector's HNSW index on the `vector` type is limited to 2,000 dimensions, which rules out 2048. A new database (the AWS one) takes the value at its first migration; the existing 1536 Compose database needs recreating or a migration plus full reindex. |
+| `INSIGHT_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | `EMBEDDING_DIMENSIONS=1024` | `voyage-4` offers 256, 512, 1024 (default) or 2048. Use 1024: pgvector's HNSW index on the `vector` type is limited to 2,000 dimensions, which rules out 2048. A new database takes the value at its first migration; the existing 1536 Compose database needs recreating or a migration plus full reindex. |
 
 Three changes are needed in `insights.py` before the Anthropic adapter will work:
 

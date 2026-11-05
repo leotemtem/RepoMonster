@@ -138,5 +138,5 @@ jobs:
           python -m pip install uv==0.11.28
           uv sync --frozen --extra db --extra web
 
-      - name: Run end-to-end tests
+      - name: Run end-to-end tests including the demo Compose stack
         run: uv run --frozen python -m unittest discover -s tests_e2e

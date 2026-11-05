@@ -44,12 +44,15 @@ The provider-neutral review core and GitLab event normalization code exist, but 
 
 - [Usage guide](docs/usage.md): repository setup, review behavior, policy, direct API, and local simulation
 - [Operations guide](docs/operations.md): Docker deployment, GitHub App setup, model connectivity, upgrades, and troubleshooting
+- [No-cost local demo](docs/operations.md#no-cost-local-demo): Compose and a free Quick Tunnel, without a domain or Cloudflare account
 - [Harness capabilities](docs/harness-capabilities.md): current boundaries, extension points, and potential integrations
 - [Architecture](docs/architecture.md): trust boundaries, storage model, retrieval, and execution flow
-- [Roadmap](docs/roadmap.md) and [implementation plan](docs/plan.md): audit findings, AWS port, model providers, and the security gate
+- [Roadmap](docs/roadmap.md) and [implementation plan](docs/plan.md): audit findings, local demo, model providers, and the security gate
 - [Repository example](examples/repository/.repomonster.yml): complete Python/FastAPI policy example
 
 ## Quick start
+
+For a temporary demonstration on your machine, follow the [local demo instructions](docs/operations.md#no-cost-local-demo). The base deployment below expects your own TLS reverse proxy.
 
 Copy the environment template and set at least the PostgreSQL password and embedding endpoint:
 

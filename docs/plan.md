@@ -28,9 +28,9 @@ uv run --frozen bandit -q -r src
 ## Decisions in force
 
 - Testing: prefer end-to-end tests in `tests_e2e/`. Keep unit tests only for logic with many branches, such as signature checks, parsers and gate decisions, and remove unit tests that end-to-end tests make redundant.
-- Infrastructure as code: **Terraform**.
+- Infrastructure: **Docker Compose for the local demo**; Terraform deferred with AWS hosting.
 - Review model: **Claude via the Anthropic API**, key in Secrets Manager (AWS) or `.env` (local).
-- Hosting: **single-tenant on the owner's AWS account, region eu-west-2**.
+- Hosting: **no-cost local demo on the owner's machine through a Cloudflare Quick Tunnel**. AWS hosting is deferred until there is a reason to run a hosted service.
 - Embeddings: **Voyage AI `voyage-4` at 1024 dimensions**, key in Secrets Manager or `.env` as `VOYAGE_API_KEY`.
 
 ## Phase 0: streamline
@@ -52,24 +52,25 @@ uv run --frozen bandit -q -r src
 
 ## Phase 0.5: hardening
 
-From the security and data-integrity audit of 2026-11-05. Finish H1 to H3 before Phase 1: autoscaled workers depend on H3. Work H4 to H6 before Phase 1 as well, keeping H3's transaction change ahead of item 0.6.
+From the security and data-integrity audit of 2026-11-05. Finish H1 to H6 before Phase 1, keeping H3's transaction change ahead of item 0.6. Future autoscaled workers also depend on H3.
 
 - [x] **H1 Gate integrity.** Stricter required-check evidence, permanent errors classified without retries, deterministic errors preserved when the model fails, repository configuration faults reported to the author, profile selection validated, and file classification tightened.
 - [x] **H2 Queue recovery.** A longer retry schedule, attempt limits enforced on reclaim, terminal failures published durably, workers that survive database restarts, and no repeated side effects after a crash.
 - [x] **H3 Concurrency.** Fenced job ownership, per-pull-request serialization, ordered policy syncs, and no HTTP calls inside database transactions.
 - [x] **H4 Model input.** Per-scope retrieval quotas, untrusted text clearly separated in the brief, explicit truncation, and filtered vector search that cannot silently return nothing.
 - [x] **H5 Resource limits.** Bounded request bodies, non-blocking routes, database timeouts, caps on embedding work, delivery coalescing, and safer YAML parsing.
-- [x] **H6 Hardening.** Stable error codes and plain-text findings in Check Runs, retention maintenance, storage validation, schema constraints, scoped tokens, cooperative shutdown, and Compose hardening. Embedding-dimension migration checks report the required database transition. Separate database roles remain in item 1.4.
+- [x] **H6 Hardening.** Stable error codes and plain-text findings in Check Runs, retention maintenance, storage validation, schema constraints, scoped tokens, cooperative shutdown, and Compose hardening. Embedding-dimension migration checks report the required database transition. Separate database roles remain deferred with AWS hosting.
 
-## Phase 1: AWS service (Terraform)
+## Phase 1: no-cost local demo
 
-- [ ] **1.1 Runtime changes for AWS.** Accept `GITHUB_PRIVATE_KEY` (PEM in an env var) as well as the key path; JSON log format; a metrics emitter for queue depth, review latency and model error rate (CloudWatch embedded metric format in logs).
-- [ ] **1.2 Terraform skeleton.** `infra/` with modules `network`, `data`, `compute`, `ci` and an `envs/prod` root. S3 remote state with locking. `terraform fmt`, `validate` and `tflint` in CI.
-- [ ] **1.3 Network module.** VPC across two AZs, private subnets for tasks and RDS, public subnets for the ALB and one NAT gateway, VPC endpoints for ECR, Secrets Manager, CloudWatch Logs and S3.
-- [ ] **1.4 Data module.** RDS PostgreSQL 16 (pgvector enabled by the migrations), encrypted, automated backups, security group open only to the task security group. Secrets Manager entries for the database URL, GitHub App key, webhook secret, `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`.
-- [ ] **1.5 Compute module.** ECR repository with scan on push; ECS cluster; API service behind the ALB (ACM certificate, health check on `/healthz`); worker service with queue-depth autoscaling; bootstrap task definition for migrations and pack sync.
-- [ ] **1.6 CI/CD.** GitHub Actions OIDC role (no stored AWS keys). On merge to `main`: build, push by digest, run the bootstrap task, then update both services.
-- [ ] **1.7 Cut-over.** Point the GitHub App webhook at the ALB hostname, redeliver a test event, confirm a Check Run publishes. Add the AWS runbook to `docs/operations.md`.
+- [x] **1.1 Demo overlay.** Keep the base Compose file unchanged. Add Caddy and a free Cloudflare Quick Tunnel, expose only the exact signed webhook route, remove host ports and the external network, and mount the operator's PEM read-only in the worker.
+- [x] **1.2 Demo runbook.** Document local prerequisites, environment variable names, startup, finding the changing tunnel URL, updating the GitHub App, manually redelivering a webhook, shutdown and availability limits in `docs/operations.md`.
+- [x] **1.3 Stack validation.** Test the real Compose image, Caddy routing, signature rejection, durable enqueue and worker claim against isolated provider stubs. Run it in the existing Docker end-to-end CI job.
+- [ ] **1.4 Live run.** Through a real Quick Tunnel and GitHub App, confirm a pull request gets a Check Run with live embedding and model providers.
+
+AWS, Terraform, managed databases, Secrets Manager, hosted CI/CD and autoscaling are
+deferred until there is a reason to host the service. Revisit deployment security,
+database roles, observability and cost before choosing that architecture.
 
 ## Phase 2: Claude and OpenAI providers
 

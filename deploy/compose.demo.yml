@@ -1,0 +1,59 @@
+# Compose 2.24.4+ is required for !override. Paths resolve from the base file.
+services:
+  bootstrap:
+    env_file: !override
+      - ${REPOMONSTER_ENV_FILE:-.env}
+
+  api:
+    env_file: !override
+      - ${REPOMONSTER_ENV_FILE:-.env}
+    networks: !override
+      - default
+    ports: !reset []
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  worker:
+    env_file: !override
+      - ${REPOMONSTER_ENV_FILE:-.env}
+    environment:
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+    volumes: !override
+      - ${GITHUB_KEY_FILE:?Set GITHUB_KEY_FILE to the absolute GitHub App PEM path}:/run/secrets/github_app_key:ro
+
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    volumes:
+      - ./deploy/Caddyfile.demo:/etc/caddy/Caddyfile:ro
+    cap_drop: [ALL]
+    # The image's binary carries this file capability and won't execute without it.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/config, /tmp]
+    mem_limit: 96m
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7@sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba
+    profiles: [tunnel]
+    command: [tunnel, --no-autoupdate, --url, "http://caddy:8080"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/config, /tmp]
+    mem_limit: 128m
+    depends_on:
+      caddy:
+        condition: service_started
+    restart: unless-stopped
+
+networks: !override
+  default: {}
