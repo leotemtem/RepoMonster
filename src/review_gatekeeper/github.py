@@ -11,11 +11,12 @@ from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
-from urllib import error as urlerror
 from urllib import parse as urlparse
-from urllib import request as urlrequest
+
+import httpx
 
 from .config import RepositoryConfig, load_repository_config
+from .http import HTTPClient, retry_after_seconds
 from .jobs import WebhookJob, WebhookQueue
 from .knowledge import (
     RepositoryKnowledgeSynchronizer,
@@ -150,6 +151,7 @@ def should_queue_event(event: str, payload: dict[str, Any], app_id: str) -> bool
 class GitHubClient:
     def __init__(self, settings: GitHubSettings) -> None:
         self.settings = settings
+        self._http = HTTPClient()
         self._installation_tokens: dict[tuple[int, int], tuple[str, datetime]] = {}
 
     def installation_token(self, installation_id: int, repository_id: int) -> str:
@@ -163,6 +165,7 @@ class GitHubClient:
             f"/app/installations/{installation_id}/access_tokens",
             token=self._app_jwt(),
             payload={"repository_ids": [repository_id]},
+            retry_post=True,
         )
         token = str(response["token"])
         expires_at = datetime.fromisoformat(
@@ -387,39 +390,36 @@ class GitHubClient:
         *,
         token: str,
         payload: dict[str, Any] | None = None,
+        retry_post: bool = False,
     ) -> Any:
         if not path.startswith("/"):
             raise ValueError("GitHub API paths must be absolute")
-        data = json.dumps(payload).encode() if payload is not None else None
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
             "User-Agent": "RepoMonster/0.1",
             "X-GitHub-Api-Version": self.settings.api_version,
         }
-        if data is not None:
-            headers["Content-Type"] = "application/json"
-        request = urlrequest.Request(
-            self.settings.api_url + path, data=data, headers=headers, method=method
-        )
         try:
-            with urlrequest.urlopen(  # nosec B310  # noqa: S310 - GitHub API URL scheme is validated.
-                request, timeout=self.settings.request_timeout_seconds
-            ) as response:
-                body = response.read()
-        except urlerror.HTTPError as exc:
-            detail = _api_error_detail(exc.read())
-            retry_after = exc.headers.get("Retry-After", "")
+            response = self._http.request(
+                method,
+                self.settings.api_url + path,
+                payload=payload,
+                headers=headers,
+                timeout=self.settings.request_timeout_seconds,
+                retry_post=retry_post,
+            )
+        except httpx.HTTPStatusError as exc:
             raise GitHubAPIError(
-                exc.code,
+                exc.response.status_code,
                 method,
                 path.split("?", 1)[0],
-                detail,
-                int(retry_after) if retry_after.isdigit() else None,
+                _api_error_detail(exc.response.content),
+                retry_after_seconds(exc.response),
             ) from exc
-        if not body:
+        if not response.content:
             return None
-        return json.loads(body)
+        return response.json()
 
 
 class GitHubReviewProcessor:

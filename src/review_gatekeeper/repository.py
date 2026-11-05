@@ -5,8 +5,8 @@ import math
 import os
 from pathlib import Path
 from typing import Any, Protocol
-from urllib import request as urlrequest
 
+from .http import HTTPClient
 from .models import ReviewProfile, ReviewRequest, StandardDocument, StandardRule
 from .url_safety import require_http_url
 
@@ -39,12 +39,19 @@ class OpenAICompatibleEmbeddingProvider:
         model: str,
         dimensions: int = 1536,
         api_key: str | None = None,
+        timeout_seconds: float = 30,
+        batch_size: int = 128,
     ) -> None:
         self.endpoint = f"{require_http_url(base_url, setting_name='EMBEDDING_BASE_URL')}/embeddings"
         self.model = model
         self.model_id = model
         self.dimensions = dimensions
         self.api_key = api_key
+        if timeout_seconds <= 0 or batch_size <= 0:
+            raise ValueError("Embedding timeout and batch size must be positive")
+        self.timeout_seconds = timeout_seconds
+        self.batch_size = batch_size
+        self._http = HTTPClient()
 
     @classmethod
     def from_environment(cls) -> OpenAICompatibleEmbeddingProvider:
@@ -53,28 +60,35 @@ class OpenAICompatibleEmbeddingProvider:
             model=os.environ["EMBEDDING_MODEL"],
             dimensions=int(os.getenv("EMBEDDING_DIMENSIONS", "1536")),
             api_key=os.getenv("EMBEDDING_API_KEY"),
+            timeout_seconds=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30")),
+            batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "128")),
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        payload = json.dumps({"model": self.model, "input": texts}).encode()
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        req = urlrequest.Request(
-            self.endpoint, data=payload, headers=headers, method="POST"
-        )
-        with urlrequest.urlopen(  # nosec B310  # noqa: S310 - Embedding endpoint URL scheme is validated.
-            req, timeout=30
-        ) as response:
-            body = json.loads(response.read())
-        vectors = [
-            item["embedding"] for item in sorted(body["data"], key=lambda x: x["index"])
-        ]
-        for vector in vectors:
-            if len(vector) != self.dimensions:
-                raise ValueError(
-                    f"Embedding service returned {len(vector)} dimensions; expected {self.dimensions}"
-                )
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
+            response = self._http.request(
+                "POST",
+                self.endpoint,
+                payload={"model": self.model, "input": batch},
+                headers=headers,
+                timeout=self.timeout_seconds,
+                retry_post=True,
+            )
+            items = sorted(response.json()["data"], key=lambda item: item["index"])
+            if [item["index"] for item in items] != list(range(len(batch))):
+                raise ValueError("Embedding service returned invalid batch indices")
+            for item in items:
+                vector = item["embedding"]
+                if len(vector) != self.dimensions:
+                    raise ValueError(
+                        f"Embedding service returned {len(vector)} dimensions; expected {self.dimensions}"
+                    )
+                vectors.append(vector)
         return vectors
 
 

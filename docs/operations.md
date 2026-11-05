@@ -54,6 +54,8 @@ Generate passwords and API keys with a cryptographically secure tool. Do not com
 | `EMBEDDING_MODEL` | yes | exact model identifier exposed by the endpoint |
 | `EMBEDDING_DIMENSIONS` | yes | vector length returned by the model |
 | `EMBEDDING_API_KEY` | endpoint-dependent | bearer token sent to the endpoint |
+| `EMBEDDING_TIMEOUT_SECONDS` | no (default `30`) | timeout per embedding request in seconds |
+| `EMBEDDING_BATCH_SIZE` | no (default `128`) | maximum texts per embedding request; positive integer |
 
 Example:
 
@@ -103,6 +105,7 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub REST base URL |
 | `GITHUB_API_VERSION` | `2026-03-10` | REST API version header |
 | `GITHUB_TIMEOUT_SECONDS` | `30` | timeout per GitHub request |
+| `HTTP_MAX_RETRIES` | `2` | short retries per GitHub or embedding request; `0` disables them |
 | `GITHUB_MAX_CHANGED_FILES` | `1000` | maximum changed files accepted for a review |
 | `GITHUB_MAX_KNOWLEDGE_FILES` | `100` | maximum default-branch knowledge files |
 | `GITHUB_MAX_KNOWLEDGE_FILE_BYTES` | `500000` | maximum bytes per knowledge file |
@@ -116,6 +119,15 @@ The embedding and insight endpoints can share a base URL and API key, but they m
 | `WORKER_POLL_SECONDS` | `2` | queue polling interval |
 
 Keep the lock timeout longer than the maximum expected full review duration.
+
+GitHub and embedding HTTP clients reject redirects. They retry connection and
+timeout errors and HTTP 429, 500, 502, 503 and 504 with exponential backoff and
+jitter, capped at 5 seconds per delay. `Retry-After` (seconds or an HTTP date)
+is honoured; a delay over 5 seconds raises immediately so the job queue can
+schedule it. GET, HEAD and PATCH may retry. POST retries require an explicit
+opt-in: installation token and embedding requests opt in, Check Run creation
+does not. Request timeouts apply per attempt; retries extend the total duration.
+Insight requests do not use these shared retry settings.
 
 ## GitHub App setup
 

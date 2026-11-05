@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- GitHub and embedding requests share a redirect-rejecting HTTP client with
+  bounded retries. Check Run creation is not retried within a queue attempt.
+  Added `HTTP_MAX_RETRIES`, `EMBEDDING_TIMEOUT_SECONDS` and
+  `EMBEDDING_BATCH_SIZE`; embedding requests are batched in input order.
+
 - Ticket-style references such as `AB-1` no longer satisfy the task-reference rule
   unless a repository sets `checks.allow_unverified_tickets: true`.
 - A model failure now shows as `blocked` when deterministic errors exist, instead of
