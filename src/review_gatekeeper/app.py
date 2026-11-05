@@ -16,8 +16,13 @@ from .service import ReviewService
 
 if TYPE_CHECKING:
     from fastapi import Request
-else:  # pragma: no cover
-    Request = Any
+else:
+    # FastAPI resolves route annotations at runtime. This must be the real class, or
+    # `request: Request` becomes a required query parameter and every webhook gets a 422.
+    try:
+        from fastapi import Request
+    except ImportError:  # pragma: no cover
+        Request = Any
 
 FastAPI: Any
 Header: Any

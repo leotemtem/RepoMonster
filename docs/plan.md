@@ -14,6 +14,7 @@ Each numbered item below is sized to be one pull request. Work top to bottom; la
 python -m pip install -e '.[db,web,dev]'
 PYTHONPATH=src python -m unittest discover -s tests
 python -m unittest discover -s tests_integration
+python -m unittest discover -s tests_e2e  # requires Docker
 ruff format --check . && ruff check . && mypy src && bandit -q -r src
 ```
 
@@ -21,6 +22,7 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 
 ## Decisions in force
 
+- Testing: prefer end-to-end tests in `tests_e2e/`. Keep unit tests only for logic with many branches, such as signature checks, parsers and gate decisions, and remove unit tests that end-to-end tests make redundant.
 - Infrastructure as code: **Terraform**.
 - Review model: **Claude via the Anthropic API**, key in Secrets Manager (AWS) or `.env` (local).
 - Hosting: single-tenant on the owner's AWS account, region eu-west-2 (default; confirm before Phase 1 item 6).
@@ -28,8 +30,11 @@ ruff format --check . && ruff check . && mypy src && bandit -q -r src
 
 ## Phase 0: streamline
 
-- [ ] **0.1 Fix the CI-timing bug (F1).** Pending CI states (`queued`, `in_progress`, `pending`, `requested`, `waiting`) become a "waiting" state: the Check Run stays `in_progress` with a summary naming the pending checks, and no gate decision is published. Queue `check_suite` and `check_run` (`completed`) and `status` events; map each to its open PRs by head SHA and re-review. Subscribe the GitHub App to those events and document it in `docs/operations.md`.
-    - Done when: unit tests cover pending, success and failure for required CI; a fixture `check_suite.completed` payload enqueues a re-review.
+- [x] **0.0 End-to-end harness.** `tests_e2e/` runs the real API and worker against real PostgreSQL with pgvector and a fake GitHub that enforces App JWTs and scoped tokens. Fixes the webhook routes, which rejected every delivery with a 422 because `Request` was `Any` at runtime.
+- [ ] **0.1 Fix the CI-timing bug (F1).** Pending CI states (`queued`, `in_progress`, `pending`, `requested`, `waiting`) and required checks that have not appeared yet become a "waiting" state: the Check Run stays `in_progress` with a summary naming the pending checks, no gate decision is published, and no model call is made. A required check still missing after a configurable wait ends in `manual_escalation`, naming the check. Queue `check_suite` and `check_run` (`completed`) and `status` events, ignoring RepoMonster's own Check Runs by app ID so a review cannot re-trigger itself. Map each event to its open PRs by head SHA and re-review once, reusing the open Check Run for that SHA. Subscribe the GitHub App to those events and document it in `docs/operations.md`.
+    - Done when: end-to-end tests cover pending to success, pending to failure, a missing check timing out, RepoMonster's own Check Run not re-triggering a review, and several checks completing without repeated reviews.
+- [ ] **0.1a Fail closed on escalation.** `manual_escalation` and terminal review failures publish `action_required` instead of `neutral`, which GitHub treats as passing for required checks.
+    - Done when: end-to-end tests cover a model failure and exhausted retries.
 - [x] **0.2 Pin tooling (F3, F12, F13).** Add a `dev` extra with pinned ruff, mypy, types-PyYAML and Bandit. Add `[tool.ruff]` with an explicit rule set, run `ruff check --fix`, fix the remainder. Raise `requires-python` to `>=3.12`. Merge the format, ruff and mypy CI jobs into one.
     - Done when: CI is green with pinned versions and no unpinned `pip install` remains in `ci.yml`.
 - [ ] **0.3 Lock dependencies and pin images (F4).** `uv lock` (commit `uv.lock`) or `pip-compile --generate-hashes`. Install from the lock in the Dockerfile and CI. Pin `python:3.12-slim` and `pgvector/pgvector:pg16` by digest. Pin every Action by commit SHA with the tag in a comment. Add a Renovate or Dependabot config covering pip, Docker and Actions.
