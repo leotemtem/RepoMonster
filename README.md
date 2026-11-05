@@ -46,6 +46,7 @@ The provider-neutral review core and GitLab event normalization exist, but GitLa
 - [Operations guide](docs/operations.md): Docker deployment, GitHub App setup, model connectivity, upgrades, and troubleshooting
 - [Harness capabilities](docs/harness-capabilities.md): current boundaries, extension points, and potential integrations
 - [Architecture](docs/architecture.md): trust boundaries, storage model, retrieval, and execution flow
+- [Roadmap](docs/roadmap.md) and [implementation plan](docs/plan.md): audit findings, AWS port, model providers, and the security gate
 - [Repository example](examples/repository/.repomonster.yml): complete Python/FastAPI policy example
 
 ## Quick start

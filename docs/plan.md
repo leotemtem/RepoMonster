@@ -1,0 +1,78 @@
+# RepoMonster: implementation plan
+
+As of 2026-11-05. Companion to [`docs/roadmap.md`](roadmap.md), which holds the audit findings (referenced here as F1 to F13) and the design for each phase.
+
+Each numbered item below is sized to be one pull request. Work top to bottom; later items assume earlier ones are merged.
+
+## Starting a new session on this plan
+
+1. Read `docs/roadmap.md`, then this file.
+2. Find the first unticked item and branch from `main` as `phase-N/<short-name>`.
+3. Before opening the PR, run the baseline checks (the `dev` extra arrives in item 0.2; until then install ruff, mypy, types-PyYAML and Bandit separately):
+
+```bash
+python -m pip install -e '.[db,web,dev]'
+PYTHONPATH=src python -m unittest discover -s tests
+python -m unittest discover -s tests_integration
+ruff format --check . && ruff check . && mypy src && bandit -q -r src
+```
+
+4. Tick the item in this file in the same PR.
+
+## Decisions in force
+
+- Infrastructure as code: **Terraform**.
+- Review model: **Claude via the Anthropic API**, key in Secrets Manager (AWS) or `.env` (local).
+- Hosting: single-tenant on the owner's AWS account, region eu-west-2 (default; confirm before Phase 1 item 6).
+- Embeddings: **Voyage AI `voyage-4` at 1024 dimensions**, key in Secrets Manager or `.env` as `VOYAGE_API_KEY`.
+
+## Phase 0: streamline
+
+- [ ] **0.1 Fix the CI-timing bug (F1).** Pending CI states (`queued`, `in_progress`, `pending`, `requested`, `waiting`) become a "waiting" state: the Check Run stays `in_progress` with a summary naming the pending checks, and no gate decision is published. Queue `check_suite` and `check_run` (`completed`) and `status` events; map each to its open PRs by head SHA and re-review. Subscribe the GitHub App to those events and document it in `docs/operations.md`.
+    - Done when: unit tests cover pending, success and failure for required CI; a fixture `check_suite.completed` payload enqueues a re-review.
+- [ ] **0.2 Pin tooling (F3, F12, F13).** Add a `dev` extra with pinned ruff, mypy, types-PyYAML and Bandit. Add `[tool.ruff]` with an explicit rule set, run `ruff check --fix`, fix the remainder. Raise `requires-python` to `>=3.12`. Merge the format, ruff and mypy CI jobs into one.
+    - Done when: CI is green with pinned versions and no unpinned `pip install` remains in `ci.yml`.
+- [ ] **0.3 Lock dependencies and pin images (F4).** `uv lock` (commit `uv.lock`) or `pip-compile --generate-hashes`. Install from the lock in the Dockerfile and CI. Pin `python:3.12-slim` and `pgvector/pgvector:pg16` by digest. Pin every Action by commit SHA with the tag in a comment. Add a Renovate or Dependabot config covering pip, Docker and Actions.
+- [ ] **0.4 Close the GitLab route (F5).** Remove `/webhooks/gitlab` until GitLab support ships, keeping `normalize_gitlab_event` and its tests.
+- [ ] **0.5 Shared HTTP client (F7).** New `http.py` on httpx with per-call timeouts, retries with backoff on 429/5xx and `Retry-After`. Move the GitHub and embedding clients onto it; make the embedding timeout configurable.
+- [ ] **0.6 Connection pool and service factory (F8, F9).** One `psycopg_pool.ConnectionPool` built at startup and injected into the queue, repository and processor. One `build_review_service()` used by both `app.py` and the worker. `/readyz` uses a public repository method.
+- [ ] **0.7 Split `github.py` (F10).** `github/client.py` (API and auth), `github/processor.py` (job handling), `github/publish.py` (Check Run text). No behaviour change; existing tests move with the code.
+- [ ] **0.8 Knowledge cache (F2).** Skip the tree walk and resync when the default-branch tree SHA matches the last sync. Queue default-branch `push` events to refresh knowledge.
+- [ ] **0.9 Naming (F11).** Rename the package `review_gatekeeper` to `repomonster`, keep one CLI (`repomonster`, with `review-gate` becoming a subcommand), one liveness route (`/healthz`), and the FastAPI title "RepoMonster". Note the rename in `CHANGELOG.md`.
+
+## Phase 1: AWS service (Terraform)
+
+- [ ] **1.1 Runtime changes for AWS.** Accept `GITHUB_PRIVATE_KEY` (PEM in an env var) as well as the key path; JSON log format; a metrics emitter for queue depth, review latency and model error rate (CloudWatch embedded metric format in logs).
+- [ ] **1.2 Terraform skeleton.** `infra/` with modules `network`, `data`, `compute`, `ci` and an `envs/prod` root. S3 remote state with locking. `terraform fmt`, `validate` and `tflint` in CI.
+- [ ] **1.3 Network module.** VPC across two AZs, private subnets for tasks and RDS, public subnets for the ALB and one NAT gateway, VPC endpoints for ECR, Secrets Manager, CloudWatch Logs and S3.
+- [ ] **1.4 Data module.** RDS PostgreSQL 16 (pgvector enabled by the migrations), encrypted, automated backups, security group open only to the task security group. Secrets Manager entries for the database URL, GitHub App key, webhook secret, `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY`.
+- [ ] **1.5 Compute module.** ECR repository with scan on push; ECS cluster; API service behind the ALB (ACM certificate, health check on `/healthz`); worker service with queue-depth autoscaling; bootstrap task definition for migrations and pack sync.
+- [ ] **1.6 CI/CD.** GitHub Actions OIDC role (no stored AWS keys). On merge to `main`: build, push by digest, run the bootstrap task, then update both services.
+- [ ] **1.7 Cut-over.** Point the GitHub App webhook at the ALB hostname, redeliver a test event, confirm a Check Run publishes. Add the AWS runbook to `docs/operations.md`.
+
+## Phase 2: Claude and OpenAI providers
+
+- [ ] **2.1 Schema compatibility.** Remove `maxItems` from `FINDINGS_RESPONSE_FORMAT`, lower-case `recommendation` before parsing, and treat `refusal` and `max_tokens` stop reasons as explicit errors. Keep the evidence truncation in code.
+- [ ] **2.2 Provider selection.** `INSIGHT_PROVIDER` (`anthropic` default, `openai`, `openai_compatible`) and `EMBEDDING_PROVIDER` (`voyage` default, `openai`, `openai_compatible`), resolved in the service factory from 0.6.
+- [ ] **2.3 Anthropic adapter.** Official `anthropic` SDK, Messages API with `output_config.format` JSON schema, SDK retries enabled, prompt caching on the system prompt and standards block. Transient errors raise to the job queue (closes F6).
+- [ ] **2.4 Voyage and OpenAI adapters.** `voyageai` SDK for embeddings with `input_type=document` for packs and knowledge and `input_type=query` for the review query, batched at up to 1,000 texts per request. Update `.env.example` to `EMBEDDING_PROVIDER=voyage`, `EMBEDDING_MODEL=voyage-4`, `EMBEDDING_DIMENSIONS=1024`. Official OpenAI SDK for chat and embeddings as the alternative.
+    - Done when: a fresh database bootstraps at 1024 dimensions and `standards reindex` succeeds against Voyage.
+- [ ] **2.5 Contract tests and comparison.** Recorded-response tests per adapter. A small fixture set of PRs with expected gate outcomes to compare models before switching defaults.
+
+## Phase 3: security gate
+
+- [ ] **3.1 Lockfile diff.** Parsers for `uv.lock`, `poetry.lock`, `requirements*.txt`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.sum`, `Cargo.lock`; base vs head diff of added, removed and changed packages.
+- [ ] **3.2 Vulnerability and health lookups.** OSV `querybatch` for the whole diff; deps.dev for Scorecard, licences and graph; registry metadata for deprecated, yanked, release age, install scripts and maintainer changes. Cache by package and version.
+- [ ] **3.3 Image checks.** Detect `FROM` changes and tag-only pins; resolve digests; Syft SBOM and Grype scan in the worker.
+- [ ] **3.4 Findings and SARIF.** `supply_chain` findings feed the existing gate; SARIF upload to GitHub code scanning.
+- [ ] **3.5 Zero Wire and KEV intelligence.** Scheduled poll of the Zero Wire RSS feed and the CISA KEV catalogue into a `threat_briefings` table; join on CVE aliases from OSV results; "Needs attention" raises the finding to an error with the briefing link. Store each default branch's dependency and image inventory and alert installed repositories when a new briefing matches.
+    - Done when: a fixture briefing for a CVE present in a test lockfile produces an error finding with the briefing link, and a new briefing triggers an alert for a repository with no open PR.
+- [ ] **3.6 Agentic audit job.** Scheduled and trigger-based runs of Cloudflare's security-audit-skill inside the Phase 4 sandbox; map `confirmed`, `needs_validation` and `rejected` into findings; token budget per run.
+
+## Phase 4: verification sandbox and attack-pattern library
+
+- [ ] **4.1 Sandbox account and network.** Separate AWS account, run subnets with no internet route, ECR endpoint only, no task role (or S3-results-only), Terraform module `sandbox`.
+- [ ] **4.2 Two-stage runner.** Build stage with an allowlisted registry proxy; run stage with no egress, CPU and memory caps, read-only root, scratch volume, hard timeout.
+- [ ] **4.3 Base and head verification.** Run the agent-written reproduction test against both commits and record the verdict from the roadmap's verdict table. Maintainer review before any test is committed.
+- [ ] **4.4 Pattern library.** Migration for `attack_patterns` and `pattern_occurrences` with an embedding column; CWE and CAPEC tagging; retrieval into review briefs.
+- [ ] **4.5 Recurrence actions.** Configurable threshold that proposes a `.repomonster/standards/security.md` entry and, where expressible, a deterministic rule; periodic cross-repository report.
