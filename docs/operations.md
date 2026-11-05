@@ -11,7 +11,83 @@ This guide covers a single-host Docker Compose deployment with PostgreSQL/pgvect
 - optionally, an OpenAI-compatible chat-completions endpoint for model findings
 - outbound connectivity from the worker to GitHub and model endpoints
 
-The supplied Compose file binds the API to `127.0.0.1:8000` and attaches it to an external Docker network named `shared`. A reverse proxy is not included.
+The base Compose file binds the API to `127.0.0.1:8000` and attaches it to an external Docker network named `shared`. For a demonstration without a domain or separate reverse proxy, use the [local demo stack](#no-cost-local-demo) below.
+
+## No-cost local demo
+
+The demo overlay runs PostgreSQL, bootstrap, API, worker, Caddy and a free
+Cloudflare Quick Tunnel on your machine. It needs no Cloudflare account or domain.
+This is a temporary demonstration setup, not a production deployment. Local
+OpenAI-compatible endpoints can keep model access free too; paid endpoints still
+incur their own charges.
+
+Prerequisites:
+
+- Docker Engine and Docker Compose 2.24.4 or later (the overlay uses `!override`)
+- a GitHub App installed on the demo repository, with the permissions and events
+  listed under [GitHub App setup](#github-app-setup)
+- a local or otherwise reachable OpenAI-compatible embedding endpoint, and
+  optionally a chat-completions endpoint
+- outbound connectivity for the tunnel, GitHub API and configured model endpoints
+- the App's PEM private key stored outside the checkout and readable by the
+  worker's UID/GID `65532:65532`
+
+Prepare the deployment `.env` using the environment configuration guidance below.
+Set `POSTGRES_PASSWORD`, `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`,
+`GITHUB_KEY_FILE` (an absolute host PEM path), `EMBEDDING_BASE_URL`,
+`EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS`. Set `EMBEDDING_API_KEY` if the
+endpoint requires it. For model findings, also set `INSIGHT_BASE_URL`,
+`INSIGHT_MODEL` and, if needed, `INSIGHT_API_KEY`. Keep these operator-controlled
+and never commit them. Native Anthropic and Voyage APIs are not supported yet.
+
+The overlay sets the worker's `GITHUB_PRIVATE_KEY_PATH` to its read-only mount at
+`/run/secrets/github_app_key`. It does not require the base deployment's `/opt`
+key location or external `shared` network. Endpoint addresses must be reachable
+from containers; their loopback address refers to the container itself. Keep
+`EMBEDDING_DIMENSIONS` consistent with any existing database volume.
+
+From the repository root, build and start the demo:
+
+```bash
+docker compose -f docker-compose.yml -f deploy/compose.demo.yml --profile tunnel up -d --build --wait --wait-timeout 180
+docker compose -f docker-compose.yml -f deploy/compose.demo.yml --profile tunnel logs --tail=100 cloudflared
+```
+
+Find the generated HTTPS Quick Tunnel URL in the `cloudflared` logs. In the GitHub
+App settings, set the webhook URL to `<tunnel URL>/webhooks/github`, keep the
+matching webhook secret, and save. Under the App's **Advanced → Recent
+deliveries**, select a pull-request delivery and choose **Redeliver**. A `ping`
+only checks connectivity; it does not enqueue a review. Inspect processing with:
+
+```bash
+docker compose -f docker-compose.yml -f deploy/compose.demo.yml --profile tunnel logs --tail=100 api worker
+```
+
+Traffic flows from the tunnel to Caddy on port 8080, then to the API. Caddy
+forwards only `POST` on the exact `/webhooks/github` path; every other request
+gets 404, including health and direct-review routes. The API still verifies the
+GitHub signature. No service publishes a host port, and cloudflared receives
+neither the deployment environment file nor application secrets. `--wait` checks
+local service startup and API readiness; inspect the tunnel logs and webhook
+delivery to confirm public connectivity.
+
+Stop the demo and remove its containers and network, retaining the database:
+
+```bash
+docker compose -f docker-compose.yml -f deploy/compose.demo.yml --profile tunnel down
+```
+
+The machine must remain on and connected throughout the demonstration. The
+Quick Tunnel URL changes on each start, so update the App webhook URL each time.
+Quick Tunnels have no uptime guarantee. GitHub does not automatically retry failed
+webhook deliveries; use **Redeliver** after an interruption. The demo uses the
+base deployment's database volume, so stop any base stack before switching and
+do not add `--volumes` unless you intend to delete its data.
+
+`REPOMONSTER_ENV_FILE` can select an alternative deployment configuration file;
+it defaults to `.env`. When using one, also pass it with Compose's `--env-file`
+for interpolation. The end-to-end test uses an empty temporary configuration and
+test-only overrides so the developer's `.env` is never loaded.
 
 ## Reproducible builds and updates
 
